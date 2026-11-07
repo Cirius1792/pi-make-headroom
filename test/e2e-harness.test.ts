@@ -457,6 +457,24 @@ test("cleanup bounds a hung proc scan and still removes registered temporary res
   assert.equal(removed, true);
 });
 
+test("owned-process discovery inspects a large host within bounded concurrency", async () => {
+  const proc = fakeProc(Array.from({ length: 40 }, (_, index) => procRecord(1000 + index)));
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const read = proc.read.bind(proc);
+  proc.read = async (pid: number) => {
+    inFlight++;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    await new Promise(resolve => setImmediate(resolve));
+    const record = await read(pid);
+    inFlight--;
+    return record;
+  };
+  const owner = new OwnedResources({ runId: "owned", uid: 42, proc, pause: async () => {}, signals: false });
+  await owner.cleanup();
+  assert.ok(maxInFlight <= 8, `expected bounded inspection concurrency, saw ${maxInFlight}`);
+});
+
 for (const stall of ["discovery", "revalidation"] as const) {
   test(`cleanup terminates a readable marked descendant despite stalled ${stall} of another record`, async t => {
     t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });

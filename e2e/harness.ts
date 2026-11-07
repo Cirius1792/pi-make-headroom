@@ -80,6 +80,11 @@ const linuxProc: ProcAccess = {
       const directory = `/proc/${pid}`;
       const metadata = await stat(directory);
       if (metadata.uid !== process.getuid?.()) return null;
+      // A user-namespace /proc can expose foreign processes whose directory
+      // appears owned by us while environ is not. Such a process cannot carry
+      // our readable marker; treat it as not owned rather than a scan failure.
+      const environMetadata = await stat(`${directory}/environ`);
+      if (environMetadata.uid !== process.getuid?.()) return null;
       const before = parseProcStat(await readFile(`${directory}/stat`, "utf8"));
       if (!before || before.pid !== pid || before.state === "Z" || before.state === "X") return null;
       const environ = await readFile(`${directory}/environ`, "utf8");
@@ -277,17 +282,23 @@ export class OwnedResources {
       try { await within(action, until); } catch { failed = true; }
     };
     const inspect = (pid: number, until: number) => within(() => this.proc.read(pid), Math.min(until, this.now() + 100));
+    // Bound /proc traffic so a large host cannot starve per-record deadlines.
+    const eachLimited = async <T>(items: T[], limit: number, action: (item: T) => Promise<void>) => {
+      for (let offset = 0; offset < items.length; offset += limit) {
+        await Promise.all(items.slice(offset, offset + limit).map(action));
+      }
+    };
     const scan = async (until: number) => {
       const records: ProcRecord[] = [];
       try {
         const pids = await within(() => this.proc.listPids(), until);
-        await Promise.all(pids.map(async pid => {
+        await eachLimited(pids, 8, async pid => {
           try {
             const record = await inspect(pid, until);
             if (record && record.pid === pid) records.push(record);
             else if (record) failed = true;
           } catch { failed = true; } // timeouts also leave other verified records usable
-        }));
+        });
       } catch { failed = true; }
       return selectOwnedProcesses(records, this.runId, this.uid);
     };
@@ -308,7 +319,7 @@ export class OwnedResources {
       let pass = 0;
       for (const signal of ["SIGTERM", "SIGKILL", "SIGKILL"] as const) {
         const until = orderlyUntil + ++pass * passMs;
-        await Promise.all((await scan(until)).map(async record => {
+        await eachLimited(await scan(until), 8, async record => {
           if (!identities.has(record.pid)) identities.set(record.pid, record.startTime);
           if (identities.get(record.pid) !== record.startTime) return;
           let current: ProcRecord | null;
@@ -319,7 +330,7 @@ export class OwnedResources {
               selectOwnedProcesses([current], this.runId, this.uid).length !== 1) return;
           try { this.proc.signal(record.pid, signal); }
           catch (error) { if (!gone(error)) failed = true; }
-        }));
+        });
         await pause(200, until);
       }
       survivors = (await scan(stopAt - reserve)).length > 0;
