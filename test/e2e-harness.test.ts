@@ -64,6 +64,18 @@ function resources(child = new FakeChild()) {
 }
 const runOptions = { cwd: "/disposable", env: { PATH: "/bin" }, timeoutMs: 30_000 };
 
+async function advanceCleanup(t: import("node:test").TestContext, pending: Promise<void>) {
+  let settled = false;
+  void pending.then(() => { settled = true; }, () => { settled = true; });
+  for (let elapsed = 0; elapsed < 5_000 && !settled; elapsed += 10) {
+    for (let i = 0; i < 40; i++) await Promise.resolve();
+    t.mock.timers.tick(10);
+  }
+  for (let i = 0; i < 40; i++) await Promise.resolve();
+  assert.equal(settled, true, "cleanup must settle within its five-second bound");
+  await pending;
+}
+
 test("exact Pi and canonical Headroom pins are retained verbatim", () => {
   for (const pi of ["1.5.0", "1.5.0-beta.1", "1.5.0+build.01", "0.0.0-alpha-1"]) {
     for (const headroom of ["0.42.0", "0.43.0rc1", "1.0.0a0", "1.0.0b2"]) {
@@ -429,18 +441,64 @@ test("cleanup revalidation requires the exact PID as well as its start-time and 
 });
 
 test("cleanup bounds a hung proc scan and still removes registered temporary resources", async t => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
   const proc = fakeProc();
   proc.read = () => new Promise(() => {});
   const owner = new OwnedResources({ runId: "owned", uid: 42, proc, pause: async () => {}, signals: false });
   let removed = false;
   owner.registerResource(async () => {}, async () => { removed = true; });
   const pending = assert.rejects(owner.cleanup(), /cleanup: resource failure/);
-  for (let i = 0; i < 20; i++) await Promise.resolve();
-  t.mock.timers.tick(5_000);
-  await pending;
+  await advanceCleanup(t, pending);
   assert.equal(removed, true);
 });
+
+for (const stall of ["discovery", "revalidation"] as const) {
+  test(`cleanup terminates a readable marked descendant despite stalled ${stall} of another record`, async t => {
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+    const proc = fakeProc([procRecord(100), procRecord(200)]);
+    const read = proc.read;
+    let stalledReads = 0;
+    let readableReads = 0;
+    const signalled: Array<[number, string, number]> = [];
+    proc.read = pid => {
+      if (pid === 100 && (++stalledReads > 1 || stall === "discovery")) return new Promise(() => {});
+      if (pid === 200) readableReads++;
+      return read(pid);
+    };
+    const signal = proc.signal;
+    proc.signal = (pid, sig) => { signalled.push([pid, sig, readableReads]); signal(pid, sig); };
+    const owner = new OwnedResources({ runId: "owned", uid: 42, proc, pause: async () => {}, signals: false });
+    const pending = assert.rejects(owner.cleanup(), /^Error: cleanup: resource failure$/);
+    await advanceCleanup(t, pending);
+    // Two independent reads per signal: discovery followed by identity revalidation.
+    assert.deepEqual(signalled, [[200, "SIGTERM", 2], [200, "SIGKILL", 4]]);
+    assert.equal(proc.records.has(200), false);
+    assert.ok(Date.now() <= 5_000);
+  });
+}
+
+for (const stall of ["stdin", "rpc", "resource"] as const) {
+  test(`cleanup reserves discovery and escalation time when orderly ${stall} close never settles`, async t => {
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+    const proc = fakeProc([procRecord(200)]);
+    const child = new FakeChild();
+    child.stdin = new Writable({ write(_chunk, _encoding, callback) { callback(); }, final() {} });
+    const owner = new OwnedResources({
+      runId: "owned", uid: 42, proc, pause: async () => {}, signals: false,
+      spawn: () => childType(child),
+    });
+    if (stall === "stdin") owner.spawnOwned("pi", [], runOptions);
+    if (stall === "rpc") owner.registerRpc(() => new Promise(() => {}));
+    let removed = false;
+    owner.registerResource(stall === "resource" ? () => new Promise(() => {}) : async () => {}, async () => { removed = true; });
+    const pending = assert.rejects(owner.cleanup(), /^Error: cleanup: resource failure$/);
+    await advanceCleanup(t, pending);
+    assert.deepEqual(proc.signals, [[200, "SIGTERM"], [200, "SIGKILL"]]);
+    assert.equal(proc.records.has(200), false);
+    assert.equal(removed, true);
+    assert.ok(Date.now() <= 5_000);
+  });
+}
 
 test("an unreadable proc record cannot prevent cleanup of other verified owned descendants", async () => {
   const proc = fakeProc([procRecord(100), procRecord(200)]);

@@ -255,56 +255,74 @@ export class OwnedResources {
   }
 
   private async performCleanup(): Promise<void> {
-    const stopAt = Math.min(this.deadline, this.now() + 5_000);
+    const startedAt = this.now();
+    const stopAt = Math.min(this.deadline, startedAt + 5_000);
+    const reserve = Math.max(0, stopAt - startedAt) / 10;
+    const orderlyUntil = startedAt + reserve;
+    // Separate budgets for orderly close, three escalation passes, final discovery,
+    // and removal. Neither a hook nor one stalled /proc record can spend them all.
+    const passMs = Math.max(0, stopAt - reserve - orderlyUntil) / 4;
     let failed = false;
     let survivors = false;
-    const within = async <T>(action: () => Promise<T>): Promise<T> => {
+    const within = async <T>(action: () => Promise<T>, until = stopAt): Promise<T> => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         return await Promise.race([
           Promise.resolve().then(action),
-          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("cleanup timeout")), Math.max(1, stopAt - this.now())); }),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("cleanup timeout")), Math.max(1, until - this.now())); }),
         ]);
       } finally { clearTimeout(timer); }
     };
-    const bounded = async (action: () => Promise<void>) => {
-      try { await within(action); } catch { failed = true; }
+    const bounded = async (action: () => Promise<void>, until = stopAt) => {
+      try { await within(action, until); } catch { failed = true; }
     };
-    const scan = async () => {
+    const inspect = (pid: number, until: number) => within(() => this.proc.read(pid), Math.min(until, this.now() + 100));
+    const scan = async (until: number) => {
       const records: ProcRecord[] = [];
-      for (const pid of await this.proc.listPids()) {
-        try {
-          const record = await this.proc.read(pid);
-          if (record && record.pid === pid) records.push(record);
-          else if (record) failed = true;
-        } catch { failed = true; } // keep cleaning other independently verified processes
-      }
+      try {
+        const pids = await within(() => this.proc.listPids(), until);
+        await Promise.all(pids.map(async pid => {
+          try {
+            const record = await inspect(pid, until);
+            if (record && record.pid === pid) records.push(record);
+            else if (record) failed = true;
+          } catch { failed = true; } // timeouts also leave other verified records usable
+        }));
+      } catch { failed = true; }
       return selectOwnedProcesses(records, this.runId, this.uid);
+    };
+    const pause = async (ms: number, until: number) => {
+      if (this.now() < until) await bounded(() => (this.options.pause ?? sleep)(Math.min(ms, until - this.now())), until);
     };
     try {
       // Closing stdin requests Pi's orderly runtime disposal before any signalling.
-      for (const child of this.children) await bounded(() => endStdin(child, stopAt - this.now()));
-      for (const close of this.rpcClosers) await bounded(close);
-      for (const resource of this.resources) await bounded(resource.close);
-      await (this.options.pause ?? sleep)(Math.max(0, Math.min(100, stopAt - this.now())));
+      await Promise.all([...this.children].map(child => bounded(() => endStdin(child, orderlyUntil - this.now()), orderlyUntil)));
+      await Promise.all([
+        ...[...this.rpcClosers].map(close => bounded(close, orderlyUntil)),
+        ...this.resources.map(resource => bounded(resource.close, orderlyUntil)),
+      ]);
+      await pause(100, orderlyUntil);
       // New detached/reparented children can appear between passes. Preserve first-seen
       // PID/start-time identities so a reused PID is never adopted during escalation.
       const identities = new Map<number, string>();
+      let pass = 0;
       for (const signal of ["SIGTERM", "SIGKILL", "SIGKILL"] as const) {
-        for (const record of await within(scan)) {
+        const until = orderlyUntil + ++pass * passMs;
+        await Promise.all((await scan(until)).map(async record => {
           if (!identities.has(record.pid)) identities.set(record.pid, record.startTime);
-          if (identities.get(record.pid) !== record.startTime) continue;
+          if (identities.get(record.pid) !== record.startTime) return;
           let current: ProcRecord | null;
-          try { current = await within(() => this.proc.read(record.pid)); }
-          catch { failed = true; continue; }
+          try { current = await inspect(record.pid, until); }
+          catch { failed = true; return; }
+          if (this.now() >= until) { failed = true; return; }
           if (!current || current.pid !== record.pid || current.startTime !== record.startTime ||
-              selectOwnedProcesses([current], this.runId, this.uid).length !== 1) continue;
+              selectOwnedProcesses([current], this.runId, this.uid).length !== 1) return;
           try { this.proc.signal(record.pid, signal); }
           catch (error) { if (!gone(error)) failed = true; }
-        }
-        await (this.options.pause ?? sleep)(Math.max(0, Math.min(200, stopAt - this.now())));
+        }));
+        await pause(200, until);
       }
-      survivors = (await within(scan)).length > 0;
+      survivors = (await scan(stopAt - reserve)).length > 0;
     } catch { failed = true; }
     finally {
       for (const resource of [...this.resources].reverse()) if (resource.remove) await bounded(resource.remove);
