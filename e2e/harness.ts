@@ -69,6 +69,11 @@ export function parseProcStat(text: string): { pid: number; state: string; start
 function gone(error: unknown): boolean {
   return ["ENOENT", "ESRCH"].includes((error as NodeJS.ErrnoException)?.code ?? "");
 }
+// Same-user services can still mark themselves non-dumpable, making environ
+// unreadable. Such a process cannot expose our marker, so it is not owned.
+function unreadable(error: unknown): boolean {
+  return ["EACCES", "EPERM"].includes((error as NodeJS.ErrnoException)?.code ?? "");
+}
 const linuxProc: ProcAccess = {
   async listPids() {
     if (process.platform !== "linux") throw new Error("cleanup: Linux /proc required");
@@ -87,13 +92,15 @@ const linuxProc: ProcAccess = {
       if (environMetadata.uid !== process.getuid?.()) return null;
       const before = parseProcStat(await readFile(`${directory}/stat`, "utf8"));
       if (!before || before.pid !== pid || before.state === "Z" || before.state === "X") return null;
-      const environ = await readFile(`${directory}/environ`, "utf8");
+      let environ: string;
+      try { environ = await readFile(`${directory}/environ`, "utf8"); }
+      catch (error) { if (unreadable(error)) return null; throw error; }
       const after = parseProcStat(await readFile(`${directory}/stat`, "utf8"));
       const recheck = await stat(directory);
       if (!after || before.startTime !== after.startTime || metadata.uid !== recheck.uid) return null;
       return { ...after, uid: recheck.uid, environ };
     } catch (error) {
-      if (gone(error)) return null;
+      if (gone(error) || unreadable(error)) return null;
       throw new Error("cleanup: process inspection failed");
     }
   },
