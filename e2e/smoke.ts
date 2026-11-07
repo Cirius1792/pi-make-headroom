@@ -24,9 +24,13 @@ export const FIXTURE_PROMPTS = [
 export const TARGET_PROMPT = "SMOKE_ANCHOR_TARGET: acknowledge completion.";
 const FINAL_REPLY = "Compatibility smoke completed.";
 export function fixtureReply(index: number): string {
-  return `Reference notebook ${index + 1}.\n` + Array.from({ length: 160 }, (_, row) =>
-    `Note ${row + 1}: The local reference service binds to loopback. The reference service keeps redundant historical notes. ` +
-    "The reference service preserves the current user instruction. The reference service is healthy and ready.\n").join("");
+  // Log-shaped redundant history: Headroom's default [proxy] extras route plain
+  // prose to the ML compressor, which is unavailable without [ml], so a bounded
+  // deterministic log fixture is used to exercise real compression instead.
+  return Array.from({ length: 120 }, (_, row) =>
+    `2026-11-07T12:${String(Math.floor(row / 60)).padStart(2, "0")}:${String(row % 60).padStart(2, "0")}Z ` +
+    `INFO reference-worker[${row % 8}] processed batch id=${row} status=ok elapsed_ms=${100 + row} ` +
+    `queue_depth=${50 - (row % 20)} note=redundant-reference-entry ${index + 1}\n`).join("");
 }
 
 async function stage<T>(name: string, category: FailureCategory, action: () => Promise<T>): Promise<T> {
@@ -37,7 +41,7 @@ async function stage<T>(name: string, category: FailureCategory, action: () => P
     const timedOut = /^(?:command:|process:|rpc:|deadline:).*?(?:timed out|timeout|deadline|exhausted|expired)/.test(message);
     const assertion = message.startsWith("assertion:");
     throw new SmokeFailure(name, timedOut ? "timeout" : assertion ? "assertion" : category,
-      timedOut ? "Operation exceeded its bounded deadline" : assertion ? "Smoke acceptance assertion failed" : "Operation failed; raw diagnostics withheld");
+      timedOut ? "Operation exceeded its bounded deadline" : assertion ? message : "Operation failed; raw diagnostics withheld");
   }
 }
 function requireCondition(condition: unknown, stage: string, message: string): asserts condition {
