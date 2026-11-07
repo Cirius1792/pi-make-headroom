@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+- Restructured `README.md` as a landing page: quick start, requirements, install variants, status line, commands, and links.
+- Added `docs/CONFIGURATION.md`: all 16 environment variables, the `config.json` schema, validation rules, version and Python pins, and tuning.
+- Added `docs/TROUBLESHOOTING.md`: symptom-by-symptom fixes, log files, full reset, and uninstall.
+
 ## [0.1.0] - 2026-11-07
 
 - Initial release.

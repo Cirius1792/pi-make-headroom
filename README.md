@@ -1,32 +1,45 @@
 # Make Headroom!
 
-**Managed Headroom context compression for Pi — pinned Python venv, lazy setup, no npm dependencies.**
+**Managed [Headroom](https://pypi.org/project/headroom-ai/) context compression for [Pi](https://pi.dev) — pinned Python venv, lazy setup, no npm dependencies.**
 
 [![CI](https://github.com/Cirius1792/pi-make-headroom/actions/workflows/ci.yml/badge.svg)](https://github.com/Cirius1792/pi-make-headroom/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/pi-make-headroom)](https://www.npmjs.com/package/pi-make-headroom)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-[github.com/Cirius1792/pi-make-headroom](https://github.com/Cirius1792/pi-make-headroom)
+Headroom is a compression proxy: it shrinks a conversation before the model reads it. This extension wires it into Pi. It provisions a private Python venv under `~/.pi/agent/make-headroom`, installs an exact `headroom-ai[proxy]` version, runs the proxy on loopback, and compresses each model request through Pi's `context` hook.
 
-Transparent context compression for [Pi](https://pi.dev) using [Headroom](https://pypi.org/project/headroom-ai/), with a managed, pinned Python virtual environment and **no npm dependencies**.
+There is no service to install, no port to remember, and nothing left behind to clean up. The name is a pun: it makes headroom in your context window, and it provisions your Python environment on first run.
 
-The extension installs an exact `headroom-ai[proxy]` version into `~/.pi/agent/make-headroom/venv`, starts the local Headroom proxy, and compresses the transcript before every model call through Pi's `context` hook.
-
-The name is a pun: it makes headroom in your context window, and on first run it provisions the Python environment for you.
-
-## Features
+## What it handles for you
 
 - **No npm dependencies.** Pi's host packages are peer dependencies; the extension uses Node built-ins and `fetch`.
-- **Pinned Headroom version.** Installs exactly `headroom-ai[proxy]==0.42.0` by default, in its own venv.
-- **Lazy setup.** The session starts immediately; install/start runs in the background.
-- **Managed lifecycle.** Start, health-check, restart, adopt, and stop the proxy automatically.
-- **Footer savings.** Shows exact tokens saved and the saved share of baseline context.
-- **Safe fallback.** If compression cannot be applied, the original transcript is sent unchanged.
+- **A pinned version.** Installs exactly `headroom-ai[proxy]==0.42.0` by default, inside its own venv, never into the system Python.
+- **Lazy setup.** Sessions start immediately. Install and startup happen in the background, and compression switches on when they finish.
+- **A managed lifecycle.** Start, health-check, adopt, restart, and stop the proxy automatically.
+- **Honest numbers.** The footer shows exact tokens saved and their share of baseline context.
+- **Safe fallback.** If a request cannot be compressed or aligned safely, the original transcript is sent unchanged.
+
+## Quick start
+
+```bash
+pi install npm:pi-make-headroom
+```
+
+Start Pi. The footer shows `⏳ Headroom starting` while the venv is built, then `✓ Headroom up · ready`, then savings as requests go through.
+
+The first run downloads Headroom and its proxy dependencies, which takes a few minutes. Later runs reuse the venv and start in seconds.
 
 ## Requirements
 
-- Pi 1.5 or newer.
-- Python 3.10 or newer on `PATH` (or set `HEADROOM_PYTHON`). Headroom 0.43+ needs Python 3.11+.
-- Network access on the first run, so pip can download Headroom into the dedicated venv.
-- No npm install and no `node_modules` are needed by the extension.
+| Requirement | Detail |
+| --- | --- |
+| Pi | 1.5 or newer. |
+| Python | 3.10 or newer on `PATH`, or set `HEADROOM_PYTHON`. Headroom 0.43+ needs 3.11+. |
+| Network | Needed on the first run so pip can populate the venv. |
+| Disk | One venv with Headroom and its proxy dependencies, under `~/.pi/agent/make-headroom`. |
+| Node | Nothing to install: the extension has no runtime npm dependencies. |
+
+On Debian or Ubuntu, install `python3-venv` alongside Python. A `python3` without `ensurepip` cannot build the venv.
 
 ## Install
 
@@ -38,22 +51,12 @@ pi install npm:pi-make-headroom
 
 ### From Git
 
-Install the latest `main`:
-
 ```bash
+# latest main
 pi install git:github.com/Cirius1792/pi-make-headroom
-```
 
-Pin a tag or commit for a reproducible install:
-
-```bash
+# reproducible
 pi install git:github.com/Cirius1792/pi-make-headroom@<tag-or-commit>
-```
-
-Update a Git install:
-
-```bash
-pi update git:github.com/Cirius1792/pi-make-headroom
 ```
 
 ### From a local checkout
@@ -62,19 +65,32 @@ pi update git:github.com/Cirius1792/pi-make-headroom
 pi install /path/to/pi-make-headroom
 ```
 
-### Try it for one run
-
-Without adding it to settings:
+### For one run, without changing settings
 
 ```bash
 pi -e npm:pi-make-headroom
-# or
 pi -e git:github.com/Cirius1792/pi-make-headroom
-# or
 pi -e /path/to/pi-make-headroom
 ```
 
-Remove the original `pi-headroom` package if it is still installed. Running both extensions compresses the same transcript twice:
+### Update
+
+```bash
+pi update npm:pi-make-headroom
+pi update git:github.com/Cirius1792/pi-make-headroom
+```
+
+Updating the extension does not change the Headroom pin. Versions are chosen by `HEADROOM_VERSION` or `config.json`, so a new extension release keeps the version you pinned.
+
+### Remove
+
+```bash
+/headroom stop                      # in Pi, so no proxy is left holding the port
+pi remove npm:pi-make-headroom      # or the git: or local path you installed from
+rm -rf ~/.pi/agent/make-headroom    # venv, config, logs
+```
+
+If the original `pi-headroom` package is still installed, remove it first. Both extensions hook the same event and would compress the same transcript twice:
 
 ```bash
 pi remove npm:pi-headroom
@@ -82,132 +98,103 @@ pi remove npm:pi-headroom
 
 ## First run
 
-On the first `session_start`, the extension:
-
 1. Creates `~/.pi/agent/make-headroom/venv` with `python -m venv`.
 2. Installs the pinned version, by default `headroom-ai[proxy]==0.42.0`.
-3. Starts the proxy on `127.0.0.1:8788` (or the next free port).
-4. Waits for `GET /health` and for the optional Kompress compression model to warm up.
-5. Begins compressing every model request.
+3. Starts `headroom proxy` on `127.0.0.1:8788`, or the next free port within 50.
+4. Waits for `GET /health`, plus a brief wait for the optional Kompress model to warm up.
 
-Setup runs in the background. The session and the agent stay usable immediately; model requests made before setup finishes are sent uncompressed, and compression turns on automatically when setup completes. The footer shows setup progress.
+Setup runs in the background. The agent stays usable throughout: requests made before setup completes are sent uncompressed, and compression turns on by itself when the proxy is ready. A starter `config.json` is written at session start if the file is missing. With `HEADROOM_URL` set, all four steps are skipped and only `/health` is checked.
 
-The first run can take a few minutes because pip downloads Headroom and its proxy dependencies. Later runs reuse the venv and start in a few seconds.
+## How it works
 
-The default configuration is written to `~/.pi/agent/make-headroom/config.json` if the file does not exist.
+For every model request Pi fires a `context` event with a copy of the conversation. The extension:
 
-## Footer
+1. Converts Pi's provider-neutral messages to the OpenAI shape Headroom expects.
+2. Calls `POST /v1/compress` on the local proxy with the active model id.
+3. Re-applies the compressed text onto the original messages, keeping tool call ids, tool results, thinking blocks, images, timestamps, usage, and provider fields from the originals.
+4. Returns the compressed copy for that one request. Session history is never modified.
 
-While a session runs, the footer status line shows:
+If Headroom changes the message count or roles in a way that cannot be aligned safely, or if the request times out, or if the proxy errors, the original transcript is used for that request. One proxy restart is attempted per session.
+
+Compression is not tied to one provider: it runs on the provider-neutral transcript Pi assembles, and the active model id is sent along so Headroom can pick a profile.
+
+Headroom's `/v1/compress` runs its compression pipeline without calling an upstream model. The proxy is a local compression service; Pi still sends the compressed request to your configured provider.
+
+Full lifecycle, module map, failure modes, and ADRs: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Status line
 
 ```text
 ✓ Headroom up · saved 12,345 tok (18%)
 ```
 
-- `saved 12,345 tok` is the exact cumulative number of tokens removed from model requests in this session.
-- `18%` is `saved / baseline`, where baseline is the total uncompressed context tokens for the same requests. `/headroom status` also shows the saved share of the tokens actually sent.
-- Before the first request: `✓ Headroom up · ready`.
-- When compression is disabled: `○ Headroom off`.
-- When the proxy is unreachable: `⚠ Headroom offline`.
+| Footer | Meaning |
+| --- | --- |
+| `⏳ Headroom starting` | Setup is running in the background. |
+| `✓ Headroom up · ready` | Proxy is online; no request counted yet this session. |
+| `✓ Headroom up · saved 12,345 tok (18%)` | Tokens removed from model requests, and their share of baseline. |
+| `○ Headroom off` | Compression disabled, by `/headroom off` or `HEADROOM_DISABLED`. |
+| `⚠ Headroom offline` | `/health` is not answering. |
 
-The percentage is cumulative across requests. It is not the reduction of the current context window. Token counts are Headroom's local tokenizer estimates, so they can differ slightly from the provider's billed token count.
+`saved` is the exact cumulative count for the session. `18%` is `saved / baseline`, where baseline is the total uncompressed context across those same requests, so it is cumulative too — not a property of the current context window. `/headroom status` also reports savings as a share of the tokens actually sent. All counts are Headroom's local tokenizer estimates and can differ slightly from your provider's billed tokens.
 
 ## Commands
 
 | Command | Effect |
-|---|---|
-| `/headroom` or `/headroom status` | Show proxy state, pinned version, venv, logs, session totals, and the last compression. |
-| `/headroom on` | Enable compression and start setup in the background if needed. |
-| `/headroom off` | Stop compressing. Cancels an in-flight setup; the proxy stays warm. |
-| `/headroom restart` | Restart the managed proxy (cancels an in-flight setup). |
-| `/headroom stop` | Stop the managed proxy and cancel an in-flight setup. |
+| --- | --- |
+| `/headroom` or `/headroom status` | Proxy state, pinned version, venv, logs, session totals, last compression. |
+| `/headroom on` | Enable compression; starts setup in the background if needed. |
+| `/headroom off` | Stop compressing and cancel an in-flight setup. The proxy stays warm. |
+| `/headroom restart` | Restart the managed proxy; cancels an in-flight setup. |
+| `/headroom stop` | Stop the managed proxy; cancels an in-flight setup. |
 | `/headroom reinstall` | Delete the venv and install the pinned version again. |
-| `/headroom health` | Check `/health` and show diagnostics. |
-| `/headroom-health` | Same as `/headroom health`. |
+| `/headroom health` | Check `/health` and print diagnostics. |
+
+`/headroom-health` is an alias for `/headroom health`.
 
 ## Configuration
 
-Precedence: environment variables, then `~/.pi/agent/make-headroom/config.json`, then the defaults.
+Precedence: environment variables, then `~/.pi/agent/make-headroom/config.json`, then defaults. The values you are most likely to change:
 
-| Environment variable | Default | Meaning |
-|---|---|---|
+| Variable | Default | Meaning |
+| --- | --- | --- |
 | `HEADROOM_VERSION` | `0.42.0` | Exact `headroom-ai` version to install. |
-| `HEADROOM_EXTRAS` | `proxy` | pip extras. Keep `proxy`; it provides the proxy server. |
-| `HEADROOM_PORT` | `8788` | First port to try. The extension scans up to 49 more ports if it is busy. |
-| `HEADROOM_HOST` | `127.0.0.1` | Bind address. |
+| `HEADROOM_PORT` | `8788` | First port to try; the next 49 are scanned if it is busy. |
 | `HEADROOM_HOME` | `~/.pi/agent/make-headroom` | Venv, config, runtime state, and logs. |
-| `HEADROOM_PYTHON` | auto | Python interpreter used to create the venv. |
-| `HEADROOM_COMPRESS_TIMEOUT_MS` | `30000` | Per-request compression timeout. |
-| `HEADROOM_INSTALL_TIMEOUT_MS` | `900000` | pip install timeout. |
-| `HEADROOM_START_TIMEOUT_MS` | `90000` | Proxy startup timeout. |
-| `HEADROOM_URL` | unset | Use an external proxy instead of managing one. |
-| `HEADROOM_PROXY_TOKEN` | unset | Bearer token for a token-protected proxy. `HEADROOM_API_KEY` also works. |
-| `HEADROOM_DISABLED` | unset | Set to `1`, `true`, `yes`, or `on` to skip Headroom. |
-| `HEADROOM_MODE` | proxy default | Passed through to the proxy. The proxy may choose `cache` mode for coding profiles. Set `token` for more aggressive compression at the risk of provider prefix-cache churn. |
-| `HEADROOM_TELEMETRY` | `off` | The extension sets this to `off` unless you set it. |
-| `HEADROOM_BEACON` | `off` | The extension sets this to `off` unless you set it. |
+| `HEADROOM_PYTHON` | auto | Interpreter used to create the venv. |
+| `HEADROOM_URL` | unset | Use a proxy you run yourself instead of a managed one. |
+| `HEADROOM_DISABLED` | unset | `1`, `true`, `yes`, or `on` skips Headroom entirely. |
 
-Example `config.json`:
+All 16 variables, the `config.json` schema, validation rules, the Python floor per Headroom version, and tuning guidance: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-```json
-{
-  "version": "0.42.0",
-  "extras": "proxy",
-  "port": 8788,
-  "host": "127.0.0.1"
-}
-```
+## Privacy and safety
 
-To pin a different version, edit `version` or set `HEADROOM_VERSION`. The extension reinstalls when the version or extras change. Headroom 0.43+ requires Python 3.11+.
+- The proxy binds loopback, and `/v1/compress` is loopback-only. Compression never leaves your machine.
+- Telemetry and the upload beacon are disabled on the proxy process unless you enable them.
+- Nothing logs prompts, message content, API keys, or proxy tokens.
+- The venv is dedicated to this extension; system Python is never modified.
+- Untrusted values are passed to `spawn` as arguments, never interpolated into a shell command.
 
-## How it works
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the module map, lifecycle, failure modes, and ADRs. For every model request, Pi fires the `context` event with a copy of the conversation. The extension:
-
-1. Converts Pi's provider-neutral messages to the OpenAI message shape expected by Headroom.
-2. Calls `POST /v1/compress` on the local proxy with the active model id.
-3. Re-applies the compressed text to the original messages. Tool call ids, tool results, thinking blocks, images, timestamps, usage, and provider fields come from the originals, so only what the model reads changes.
-4. Returns the compressed copy for that one request. The session history is not modified.
-
-If Headroom changes the message count or roles in a way that cannot be aligned safely, the extension keeps the original transcript for that request. It also falls back to the original transcript on a timeout or proxy error, and tries one proxy restart per session.
-
-Headroom's `/v1/compress` entry point runs its compression pipeline without calling an upstream model. The proxy is a local compression service; Pi still sends the compressed request to its configured provider.
-
-## Logs and state
-
-| Path | Contents |
-|---|---|
-| `~/.pi/agent/make-headroom/venv` | Dedicated Python virtual environment. |
-| `~/.pi/agent/make-headroom/config.json` | Default configuration. |
-| `~/.pi/agent/make-headroom/requirements.txt` | Exact pip requirement used for the venv. |
-| `~/.pi/agent/make-headroom/runtime.json` | Port, pid, version, and venv of the running proxy. |
-| `~/.pi/agent/make-headroom/install.log` | pip and venv output. |
-| `~/.pi/agent/make-headroom/proxy.log` | Proxy stdout and stderr. |
-
-The proxy is stopped on normal Pi exit if this extension started it. `/headroom stop` and `/headroom off` also cancel an in-flight install. A proxy adopted from a previous Pi process is left running so the next session can reuse it; if Pi exits uncleanly, the detached proxy may survive and be reused next time.
+Details and reporting: [SECURITY.md](SECURITY.md).
 
 ## Troubleshooting
 
-**`Headroom offline` after startup.** Read `~/.pi/agent/make-headroom/proxy.log`. Common causes: no network on the first run, a Python without `venv`/`ensurepip`, or a port collision. Run `/headroom reinstall`.
+`⚠ Headroom offline` → read `~/.pi/agent/make-headroom/proxy.log`, then run `/headroom reinstall`.
+`Python 3.10+ was not found` → install a newer Python, or set `HEADROOM_PYTHON`; on Debian/Ubuntu add `python3-venv`.
+`pip install failed` → `~/.pi/agent/make-headroom/install.log` has the full output; check the pin exists on PyPI.
 
-**`Python 3.10+ was not found`.** Install Python 3.10 or newer, or set `HEADROOM_PYTHON` to an interpreter path. On Debian/Ubuntu, install `python3-venv` as well.
-
-**`pip install failed`.** The extension logs the full pip output to `install.log`. Check the pinned version exists on PyPI and that the interpreter meets its `Requires-Python` value.
-
-**Savings stay at zero.** Depending on the Headroom version and savings profile, Headroom may protect user messages and several tool outputs. It mostly compresses assistant prose, older tool results, and format-specific content. A short conversation may have nothing to compress. Use `/headroom status` to see the last request's transforms.
-
-**The footer shows a smaller percentage than expected.** The percentage is `saved / baseline`, where baseline is the uncompressed context size. A request that saves 2,000 of 100,000 baseline tokens shows 2%.
-
-**Double compression.** Remove the original `pi-headroom` package. This extension warns on startup if it finds it.
+For savings that stay at zero, lock timeouts, leftover proxies, a full reset, and removing the extension: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ## Documentation
 
 | Document | Contents |
-|---|---|
-| [AGENTS.md](AGENTS.md) | Agent instructions: verified commands, invariants, boundaries. |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, PR workflow, coding standards. |
+| --- | --- |
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every environment variable, `config.json`, validation, tuning. |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Symptom-by-symptom fixes, logs, reset, uninstall. |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System context, lifecycle, modules, failure modes. |
 | [docs/adr/](docs/adr/) | Architecture decision records. |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, tests, PR workflow, coding standards. |
+| [AGENTS.md](AGENTS.md) | Agent instructions: verified commands, invariants, boundaries. |
 | [SECURITY.md](SECURITY.md) | Vulnerability reporting and security scope. |
 | [CHANGELOG.md](CHANGELOG.md) | Release notes. |
 
@@ -217,12 +204,10 @@ The proxy is stopped on normal Pi exit if this extension started it. `/headroom 
 npm test
 ```
 
-The tests use Node's built-in TypeScript support (Node 22+). No dependency install is required. The extension source is TypeScript loaded by Pi's `jiti` loader. CI runs `npm test`, a module import check, and `npm pack --dry-run` on Node 22 and 24.
+Tests use Node's built-in TypeScript support (Node 22+). No dependency install is required, and no test needs a live proxy. The extension source is TypeScript loaded by Pi's `jiti`. CI runs `npm test`, a module import check, and `npm pack --dry-run` on Node 22 and 24.
 
-## Repository
-
-[github.com/Cirius1792/pi-make-headroom](https://github.com/Cirius1792/pi-make-headroom)
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
 
 ## License
 
-Apache-2.0.
+Apache-2.0. See [LICENSE](LICENSE).

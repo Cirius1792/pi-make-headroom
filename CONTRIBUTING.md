@@ -49,7 +49,7 @@ There is no lint, typecheck, or build step. CI runs `npm test`, a module import 
 3. Add or update tests in `test/`.
 4. Run `npm test` and paste the result in the PR.
 5. If you touched extension wiring or process lifecycle, also run the module import check and the Pi load check.
-6. Update `README.md` and `CHANGELOG.md` for user-visible changes.
+6. Update `README.md`, the relevant page under `docs/`, and `CHANGELOG.md` for user-visible changes.
 7. Commit with a conventional message, for example `fix(proxy): release lock on cancellation`.
 8. For a non-obvious design choice, add an ADR under [`docs/adr/`](docs/adr/).
 9. Open a pull request with the checklist below.
@@ -80,7 +80,7 @@ There is no lint, typecheck, or build step. CI runs `npm test`, a module import 
 - [ ] `npm test` passes; output is pasted in the PR.
 - [ ] Relevant module import or Pi load check passes.
 - [ ] New behavior has a test.
-- [ ] `README.md` and `CHANGELOG.md` are updated for user-visible changes.
+- [ ] `README.md`, the relevant `docs/` page, and `CHANGELOG.md` are updated for user-visible changes.
 - [ ] No new runtime dependency.
 - [ ] No secrets, prompts, or private message content are included.
 - [ ] No `node_modules`, venv, log, or `*.tgz` files are committed.
