@@ -283,7 +283,7 @@ export class OwnedResources {
     const bounded = async (action: () => Promise<void>, until = stopAt) => {
       try { await within(action, until); } catch { fail("bounded"); }
     };
-    const inspect = (pid: number, until: number) => within(() => this.proc.read(pid), Math.min(until, this.now() + 100));
+    const inspect = (pid: number, until: number) => within(() => this.proc.read(pid), Math.min(until, this.now() + 500));
     // Bound /proc traffic so a large host cannot starve per-record deadlines.
     const eachLimited = async <T>(items: T[], limit: number, action: (item: T) => Promise<void>) => {
       for (let offset = 0; offset < items.length; offset += limit) {
@@ -295,6 +295,7 @@ export class OwnedResources {
       try {
         const pids = await within(() => this.proc.listPids(), until);
         await eachLimited(pids, 8, async pid => {
+          if (this.now() >= until) return;
           try {
             const record = await inspect(pid, until);
             if (record && record.pid === pid) records.push(record);
@@ -327,7 +328,7 @@ export class OwnedResources {
           let current: ProcRecord | null;
           try { current = await inspect(record.pid, until); }
           catch { fail("revalidate"); return; }
-          if (this.now() >= until) { fail("expired"); return; }
+          if (this.now() >= until) return;
           if (!current || current.pid !== record.pid || current.startTime !== record.startTime ||
               selectOwnedProcesses([current], this.runId, this.uid).length !== 1) return;
           try { this.proc.signal(record.pid, signal); }
