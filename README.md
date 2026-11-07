@@ -192,6 +192,7 @@ For savings that stay at zero, lock timeouts, leftover proxies, a full reset, an
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every environment variable, `config.json`, validation, tuning. |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Symptom-by-symptom fixes, logs, reset, uninstall. |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System context, lifecycle, modules, failure modes. |
+| [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | Run the manual Pi / Headroom version-pair smoke check. |
 | [docs/adr/](docs/adr/) | Architecture decision records. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, tests, PR workflow, coding standards. |
 | [AGENTS.md](AGENTS.md) | Agent instructions: verified commands, invariants, boundaries. |

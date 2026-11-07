@@ -1,0 +1,98 @@
+name: Compatibility smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      pi_version:
+        description: Exact published Pi npm version
+        required: true
+        type: string
+      headroom_version:
+        description: Exact canonical Headroom PyPI version
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PI_VERSION: ${{ inputs.pi_version }}
+      HEADROOM_VERSION: ${{ inputs.headroom_version }}
+      E2E_RESULT_PATH: ${{ runner.temp }}/compatibility-smoke-result.json
+      npm_config_update_notifier: 'false'
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up Python
+        id: python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run compatibility smoke
+        env:
+          HEADROOM_PYTHON: ${{ steps.python.outputs.python-path }}
+        run: node --experimental-strip-types e2e/smoke.ts
+
+      - name: Summarize smoke result
+        if: always()
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+          const summary = process.env.GITHUB_STEP_SUMMARY;
+          const path = process.env.E2E_RESULT_PATH;
+          if (!existsSync(path)) {
+            appendFileSync(summary, '# Compatibility smoke\n\nNo smoke result was produced. Inspect the failed setup/runner step; compatibility is unproven.\n');
+          } else {
+            const result = JSON.parse(readFileSync(path, 'utf8'));
+            if (result.schemaVersion !== 1) throw new Error('Unsupported smoke result schema');
+            const escape = value => String(value ?? 'not recorded')
+              .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+              .replaceAll('|', '&#124;').replaceAll('\n', ' ');
+            const rows = [
+              ['Outcome', result.outcome],
+              ['Extension SHA', result.extensionCommit || undefined],
+              ['Requested Pi', result.requested.piVersion || undefined],
+              ['Actual Pi', result.actual.piVersion],
+              ['Requested Headroom', result.requested.headroomVersion || undefined],
+              ['Actual Headroom', result.actual.headroomVersion],
+              ['Node', result.actual.nodeVersion],
+              ['Python', result.actual.pythonVersion],
+              ['Installation', result.checks.installation.status],
+              ['Health/status', result.checks.healthStatus.status],
+              ['Compression', result.checks.compression.status],
+              ['Cleanup', result.cleanup.status],
+              ['Failing stage', result.failure?.stage ?? 'none'],
+              ['Failure category', result.failure?.category ?? 'none'],
+              ['Failure message', result.failure?.message ?? 'none'],
+              ['Historical assistant characters before', result.compression?.beforeChars],
+              ['Historical assistant characters after', result.compression?.afterChars],
+              ['Saved tokens before target turn', result.compression?.savedTokensBefore],
+              ['Saved tokens after target turn', result.compression?.savedTokensAfter],
+              ['Target-turn saved tokens', result.compression?.targetSavedTokens],
+            ];
+            appendFileSync(summary, '# Compatibility smoke\n\n| Evidence | Result |\n| --- | --- |\n' +
+              rows.map(([key, value]) => `| ${key} | <code>${escape(value)}</code> |`).join('\n') + '\n');
+          }
+          NODE
+
+      - name: Upload sanitized smoke result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compatibility-smoke-result
+          path: ${{ env.E2E_RESULT_PATH }}
+          if-no-files-found: warn
