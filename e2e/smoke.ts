@@ -78,6 +78,32 @@ async function diagnosticTail(path: string): Promise<string> {
   } catch { return ""; }
 }
 
+/** All stage operations share one absolute deadline, inside the owner's cleanup reserve. */
+function stageBudget(owner: OwnedResources, name: string, deadline: number) {
+  const timeout = (cap: "inspect" | "rpc" | "prompt" = "inspect") => {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new SmokeFailure(name, "timeout", "Operation exceeded its bounded stage deadline");
+    return Math.min(remaining, owner.timeout(cap));
+  };
+  return {
+    timeout,
+    async wait<T>(action: () => Promise<T>, cap: "inspect" | "rpc" | "prompt" = "inspect"): Promise<T> {
+      const ms = timeout(cap);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const value = await Promise.race([
+          Promise.resolve().then(action),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new SmokeFailure(name, "timeout", "Operation exceeded its bounded stage deadline")), ms);
+          }),
+        ]);
+        timeout(cap); // A late result must never become a successful stage transition.
+        return value;
+      } finally { clearTimeout(timer); }
+    },
+  };
+}
+
 /** Read only fixed numeric/status fields; notifications themselves stay in memory. */
 export function parseSavedTokens(notification: string): number {
   const match = /^\s*Saved:\s*([\d,]+) tokens\b/m.exec(notification);
@@ -86,30 +112,55 @@ export function parseSavedTokens(notification: string): number {
   return value;
 }
 
-async function notification(rpc: RpcSession, owner: OwnedResources, command: "status" | "health"): Promise<string> {
+async function notification(rpc: RpcSession, owner: OwnedResources, command: "status" | "health",
+  timeout = () => owner.timeout("rpc")): Promise<string> {
   const pending = rpc.waitFor(record => record.type === "extension_ui_request" && record.method === "notify" &&
     typeof record.message === "string" && (command === "status"
-      ? record.message.includes("Headroom context compression") : record.message.includes("Headroom proxy:")), owner.timeout("rpc"));
+      ? record.message.includes("Headroom context compression") : record.message.includes("Headroom proxy:")), timeout());
   // Observe both promises even if command acceptance fails.
-  const [event] = await Promise.all([pending, rpc.command({ type: "prompt", message: `/headroom ${command}` }, owner.timeout("rpc"))]);
+  const [event] = await Promise.all([pending, rpc.command({ type: "prompt", message: `/headroom ${command}` }, timeout())]);
   return event.message as string;
 }
 
-async function turn(rpc: RpcSession, owner: OwnedResources, prompt: string, expected: string): Promise<void> {
-  // Subscribe before sending. get_state + authoritative message_end works even without agent_settled.
-  const end = rpc.waitFor(event => event.type === "message_end" &&
-    (event.message as Record<string, unknown>)?.role === "assistant", owner.timeout("prompt"));
-  const [completed] = await Promise.all([end, rpc.command({ type: "prompt", message: prompt }, owner.timeout("prompt"))]);
-  const stopAt = Date.now() + owner.timeout("prompt");
+export async function turn(rpc: RpcSession, owner: OwnedResources, prompt: string, expected: string): Promise<void> {
+  const budget = stageBudget(owner, "turn", Date.now() + owner.timeout("prompt"));
+  // Subscribe before sending. Completion and idle confirmation spend the SAME prompt budget.
+  const [completed] = await budget.wait(() => {
+    const end = rpc.waitFor(event => event.type === "message_end" &&
+      (event.message as Record<string, unknown>)?.role === "assistant", budget.timeout("prompt"));
+    return Promise.all([end, rpc.command({ type: "prompt", message: prompt }, budget.timeout("prompt"))]);
+  }, "prompt");
   while (true) {
-    const response = await rpc.command({ type: "get_state" }, Math.min(owner.timeout("rpc"), Math.max(1, stopAt - Date.now())));
+    const response = await budget.wait(() => rpc.command({ type: "get_state" }, budget.timeout("rpc")), "rpc");
     const state = response.data as Record<string, unknown>;
     if (state?.isStreaming === false && state.isCompacting === false && state.pendingMessageCount === 0) {
       assertCompletedTurn(completed.message as Record<string, unknown>, state, expected);
+      budget.timeout();
       return;
     }
-    if (Date.now() >= stopAt) throw new SmokeFailure("turn", "timeout", "Model turn did not become idle");
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await budget.wait(() => new Promise(resolve => setTimeout(resolve, Math.min(50, budget.timeout()))));
+  }
+}
+
+/** Runtime reading is injectable so deadline boundaries can be exercised without managed setup. */
+export async function waitForManagedRuntime(rpc: RpcSession, owner: OwnedResources, managed: string,
+  options: { deadline?: number; readRuntime?: () => Promise<string> } = {}): Promise<Record<string, unknown>> {
+  const setupDeadline = options.deadline ?? Math.min(owner.deadline - 15_000, Date.now() + 20 * 60_000);
+  const budget = stageBudget(owner, "managed-setup", setupDeadline);
+  const readRuntime = options.readRuntime ?? (() => readFile(join(managed, "runtime.json"), "utf8"));
+  while (true) {
+    try {
+      const runtime = JSON.parse(await budget.wait(readRuntime));
+      budget.timeout();
+      return runtime;
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    // Observe lazy setup without invoking on/restart or replacing session_start.
+    const status = await budget.wait(() => notification(rpc, owner, "status", () => budget.timeout("rpc")), "rpc");
+    if (/Status:\s*offline/.test(status) && !status.includes("setup is running")) {
+      const diagnostics = await budget.wait(() => Promise.all(["install.log", "proxy.log"].map(name => diagnosticTail(join(managed, name)))));
+      throw diagnoseSetupFailure([status, ...diagnostics].join("\n"));
+    }
+    await budget.wait(() => new Promise(resolve => setTimeout(resolve, Math.min(1000, budget.timeout()))));
   }
 }
 
@@ -208,32 +259,24 @@ export async function runSmoke(env: NodeJS.ProcessEnv = process.env) {
         });
         await stage("managed-setup", "provisioning", async () => {
           const setupDeadline = Math.min(resources.deadline - 15_000, Date.now() + 20 * 60_000);
-          while (true) {
-            resources.timeout("inspect");
-            try { runtime = JSON.parse(await readFile(join(workspace, "managed/runtime.json"), "utf8")); break; }
-            catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-            if (Date.now() >= setupDeadline) throw new SmokeFailure("managed-setup", "timeout", "Managed setup did not publish runtime state within twenty minutes");
-            // Observe lazy setup without invoking on/restart or replacing session_start.
-            const status = await notification(rpc, resources, "status");
-            if (/Status:\s*offline/.test(status) && !status.includes("setup is running")) {
-              const diagnostics = await Promise.all(["install.log", "proxy.log"].map(name => diagnosticTail(join(workspace, "managed", name))));
-              throw diagnoseSetupFailure([status, ...diagnostics].join("\n"));
-            }
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          }
+          const budget = stageBudget(resources, "managed-setup", setupDeadline);
+          runtime = await waitForManagedRuntime(rpc, resources, join(workspace, "managed"), { deadline: setupDeadline });
           const managed = join(workspace, "managed");
           requireCondition(runtime.host === "127.0.0.1" && Number.isInteger(runtime.port) && Number(runtime.port) > 0 && Number(runtime.port) <= 65535 &&
             runtime.venv === join(managed, "venv") && runtime.version === result.requested.headroomVersion &&
             Number.isSafeInteger(runtime.pid) && Number(runtime.pid) > 0, "managed-paths", "Runtime does not belong to this managed home");
-          const marker = await readFile(`/proc/${runtime.pid}/environ`, "utf8");
+          const marker = await budget.wait(() => readFile(`/proc/${runtime.pid}/environ`, "utf8"));
           requireCondition(marker.split("\0").includes(`HEADROOM_E2E_RUN_ID=${resources.runId}`), "managed-ownership", "Proxy is not tagged as owned by this run");
           endpoint = `http://127.0.0.1:${runtime.port}`;
-          const version = (await run(join(managed, "venv/bin/python"), ["-c", "from importlib.metadata import version; print(version('headroom-ai'))"], workspace)).stdout.trim();
+          const version = (await budget.wait(() => resources.runOwned(join(managed, "venv/bin/python"),
+            ["-c", "from importlib.metadata import version; print(version('headroom-ai'))"],
+            { cwd: workspace, env: childEnv, timeoutMs: budget.timeout() }))).stdout.trim();
           requireCondition(version === result.requested.headroomVersion, "headroom-version", "Installed Headroom metadata differs from canonical requested version");
           result.actual.headroomVersion = version;
-          const status = await notification(rpc, resources, "status");
+          const status = await budget.wait(() => notification(rpc, resources, "status", () => budget.timeout("rpc")), "rpc");
           requireCondition(/Status:\s*online/.test(status) && /Mode:\s*managed by this extension/.test(status) &&
             status.includes(endpoint) && status.includes(join(managed, "venv")), "managed-online", "Extension did not report this managed instance online");
+          budget.timeout();
         });
       },
       healthStatus: async () => stage("health-status", "protocol", async () => {

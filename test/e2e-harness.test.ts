@@ -593,6 +593,102 @@ test("mock rejects malformed JSON and oversized bodies without retaining raw pay
   assert.equal((await request(mock, llmRequest)).status, 200);
 });
 
+async function flushClock() {
+  for (let i = 0; i < 40; i++) await Promise.resolve();
+}
+const idleState = { isStreaming: false, isCompacting: false, pendingMessageCount: 0 };
+const completedMessage = { role: "assistant", content: "expected", stopReason: "stop" };
+
+for (const [idleDelay, succeeds] of [[49, true], [50, false], [100, false]] as const) {
+  test(`turn shares one prompt deadline with delayed completion and idle after ${idleDelay}ms`, async t => {
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+    const { owner } = resources();
+    const { child, session } = rpc();
+    t.after(async () => { await session.close(); await owner.cleanup(); });
+    child.onWrite = record => {
+      if (record.type === "prompt") {
+        child.record({ type: "response", id: record.id, success: true });
+        setTimeout(() => child.record({ type: "message_end", message: completedMessage }), 119_950);
+      } else {
+        setTimeout(() => child.record({ type: "response", id: record.id, success: true, data: idleState }), idleDelay);
+      }
+    };
+    const outcome = smoke.turn(session, owner, "anchor", "expected").then(
+      () => ({ ok: true, at: Date.now(), error: undefined }),
+      error => ({ ok: false, at: Date.now(), error }),
+    );
+    await flushClock();
+    t.mock.timers.tick(119_950);
+    await flushClock();
+    // Advance in single milliseconds so resolution times are not hidden by a large fake-clock jump.
+    for (let i = 0; i < 100; i++) { t.mock.timers.tick(1); await flushClock(); }
+    const result = await outcome;
+    assert.equal(result.ok, succeeds);
+    assert.equal(result.at, succeeds ? 119_999 : 120_000);
+    if (!succeeds) assert.match(String(result.error), /timeout|deadline/);
+  });
+}
+
+test("managed setup rejects runtime publication beyond its deadline instead of starting another poll", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const { owner } = resources();
+  const { child, session } = rpc();
+  t.after(async () => { await session.close(); await owner.cleanup(); });
+  child.onWrite = record => {
+    child.record({ type: "response", id: record.id, success: true });
+    child.record({ type: "extension_ui_request", method: "notify", message: "Headroom context compression\nStatus: offline; setup is running" });
+  };
+  let reads = 0;
+  const outcome = smoke.waitForManagedRuntime(session, owner, "/unused", { readRuntime: async () => {
+    if (++reads > 1) return JSON.stringify({ port: 12345 });
+    t.mock.timers.setTime(1_199_500);
+    throw Object.assign(new Error("missing"), { code: "ENOENT" });
+  } }).then(
+    () => ({ ok: true, at: Date.now() }),
+    error => ({ ok: false, at: Date.now(), error }),
+  );
+  await flushClock();
+  t.mock.timers.tick(500);
+  await flushClock();
+  t.mock.timers.tick(500);
+  await flushClock();
+  const result = await outcome;
+  assert.equal(result.ok, false);
+  assert.equal(result.at, 1_200_000);
+  assert.equal(reads, 1, "no runtime read may start after expiry");
+  assert.match(String(result.error), /timeout|deadline/);
+});
+
+test("managed setup checks expiry before accepting a runtime read that returns late", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const { owner } = resources();
+  const { session } = rpc();
+  t.after(async () => { await session.close(); await owner.cleanup(); });
+  await assert.rejects(smoke.waitForManagedRuntime(session, owner, "/unused", { readRuntime: async () => {
+    t.mock.timers.setTime(1_200_001);
+    return JSON.stringify({ port: 12345 });
+  } }), /timeout|deadline/);
+});
+
+test("managed setup caps status RPC at the remaining setup budget", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const { owner } = resources();
+  const { session } = rpc();
+  t.after(async () => { await session.close(); await owner.cleanup(); });
+  const outcome = smoke.waitForManagedRuntime(session, owner, "/unused", { readRuntime: async () => {
+    t.mock.timers.setTime(1_199_990);
+    throw Object.assign(new Error("missing"), { code: "ENOENT" });
+  } }).then(() => assert.fail("setup must expire"), error => ({ error, at: Date.now() }));
+  await flushClock();
+  t.mock.timers.tick(10);
+  await flushClock();
+  t.mock.timers.tick(29_990);
+  await flushClock();
+  const result = await outcome;
+  assert.equal(result.at, 1_200_000);
+  assert.match(String(result.error), /timeout|deadline/);
+});
+
 test("live workspace supplies explicit isolated child homes and removes its disposable tree", async () => {
   const allocated = await smoke.createSmokeWorkspace({ piVersion: "1.5.0", headroomVersion: "0.42.0" }, { PATH: "/usr/bin", OPENAI_API_KEY: "secret" });
   try {
