@@ -2,6 +2,8 @@
 
 **Managed Headroom context compression for Pi — pinned Python venv, lazy setup, no npm dependencies.**
 
+[![CI](https://github.com/Cirius1792/pi-make-headroom/actions/workflows/ci.yml/badge.svg)](https://github.com/Cirius1792/pi-make-headroom/actions/workflows/ci.yml)
+
 [github.com/Cirius1792/pi-make-headroom](https://github.com/Cirius1792/pi-make-headroom)
 
 Transparent context compression for [Pi](https://pi.dev) using [Headroom](https://pypi.org/project/headroom-ai/), with a managed, pinned Python virtual environment and **no npm dependencies**.
@@ -134,7 +136,7 @@ To pin a different version, edit `version` or set `HEADROOM_VERSION`. The extens
 
 ## How it works
 
-For every model request, Pi fires the `context` event with a copy of the conversation. The extension:
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the module map, lifecycle, failure modes, and ADRs. For every model request, Pi fires the `context` event with a copy of the conversation. The extension:
 
 1. Converts Pi's provider-neutral messages to the OpenAI message shape expected by Headroom.
 2. Calls `POST /v1/compress` on the local proxy with the active model id.
@@ -172,13 +174,24 @@ The proxy is stopped on normal Pi exit if this extension started it. `/headroom 
 
 **Double compression.** Remove the original `pi-headroom` package. This extension warns on startup if it finds it.
 
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [AGENTS.md](AGENTS.md) | Agent instructions: verified commands, invariants, boundaries. |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, PR workflow, coding standards. |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System context, lifecycle, modules, failure modes. |
+| [docs/adr/](docs/adr/) | Architecture decision records. |
+| [SECURITY.md](SECURITY.md) | Vulnerability reporting and security scope. |
+| [CHANGELOG.md](CHANGELOG.md) | Release notes. |
+
 ## Development
 
 ```bash
 npm test
 ```
 
-The tests use Node's built-in TypeScript support (Node 22+). No `npm install` is required. The extension source is TypeScript loaded by Pi's `jiti` loader.
+The tests use Node's built-in TypeScript support (Node 22+). No dependency install is required. The extension source is TypeScript loaded by Pi's `jiti` loader. CI runs `npm test`, a module import check, and `npm pack --dry-run` on Node 22 and 24.
 
 ## Repository
 

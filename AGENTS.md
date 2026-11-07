@@ -31,7 +31,7 @@
 |------|---------|
 | `src/` | Extension source. Detailed file map, golden samples, and terminology: `./src/AGENTS.md`. |
 | `test/` | `node:test` suites. Conventions and cleanup rules: `./test/AGENTS.md`. |
-| `README.md`, `CHANGELOG.md` | Human install/usage/reference and release notes. |
+| `README.md`, `CHANGELOG.md`, `docs/`, `SECURITY.md`, `.github/` | Human docs, architecture/ADRs, release notes, security policy, CI/PR template. |
 | `package.json` | Manifest, scripts, peer dependencies. `dependencies` must stay empty. |
 
 ## Invariants
@@ -67,7 +67,7 @@
 - Edit `LICENSE` or push directly to `main`.
 
 ## Codebase state
-- No lint, typecheck, build, or CI is configured. `npm test` is the only automated gate.
+- No lint/typecheck/build is configured. CI runs `npm test`, a module import check, and `npm pack --dry-run` on Node 22 and 24.
 - Tests use Node 22+ built-in TypeScript stripping; the runtime loads TypeScript via Pi's `jiti`.
 - Strip-only mode does not support parameter properties, enums, or namespaces. Use plain fields and string unions.
 - Use `import type` for `@earendil-works/pi-*` imports.

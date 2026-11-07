@@ -4,7 +4,7 @@ Thanks for improving `pi-make-headroom`. This project is a Pi extension that ins
 
 ## Before you start
 
-- Read [`AGENTS.md`](AGENTS.md) and the nearest scoped `AGENTS.md` (`src/` or `test/`).
+- Read [`AGENTS.md`](AGENTS.md), the nearest scoped `AGENTS.md` (`src/` or `test/`), and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 - For a bug, include the Pi version, OS, Python version, `HEADROOM_VERSION`, and the relevant `~/.pi/agent/make-headroom/proxy.log` tail.
 - For a large change, open an issue first so the approach can be agreed before implementation.
 - Never include API keys, prompts, or private message content in issues or logs.
@@ -40,7 +40,7 @@ pi --no-extensions -e ./src/index.ts --list-models
 | Verify package contents | `npm pack --dry-run` |
 | Load the extension in Pi | `pi --no-extensions -e ./src/index.ts --list-models` |
 
-There is no lint, typecheck, build, or CI gate yet. `npm test` is the only automated check; use the commands above for the relevant change.
+There is no lint, typecheck, or build step. CI runs `npm test`, a module import check, and `npm pack --dry-run` on Node 22 and 24; use the commands above for the relevant local check.
 
 ## Development workflow
 
@@ -51,7 +51,8 @@ There is no lint, typecheck, build, or CI gate yet. `npm test` is the only autom
 5. If you touched extension wiring or process lifecycle, also run the module import check and the Pi load check.
 6. Update `README.md` and `CHANGELOG.md` for user-visible changes.
 7. Commit with a conventional message, for example `fix(proxy): release lock on cancellation`.
-8. Open a pull request with the checklist below.
+8. For a non-obvious design choice, add an ADR under [`docs/adr/`](docs/adr/).
+9. Open a pull request with the checklist below.
 
 ## Coding standards
 
@@ -96,7 +97,7 @@ AI assistance is welcome. Follow the same bar as human contributions:
 
 ## Security
 
-Please report vulnerabilities privately through GitHub Security Advisories or by contacting the maintainer. Do not open a public issue for a vulnerability.
+Please report vulnerabilities privately through GitHub Security Advisories or by contacting the maintainer. Do not open a public issue for a vulnerability. See [`SECURITY.md`](SECURITY.md) for scope and expectations.
 
 ## License
 
