@@ -22,7 +22,6 @@ jobs:
     env:
       PI_VERSION: ${{ inputs.pi_version }}
       HEADROOM_VERSION: ${{ inputs.headroom_version }}
-      E2E_RESULT_PATH: ${{ runner.temp }}/compatibility-smoke-result.json
       npm_config_update_notifier: 'false'
     steps:
       - name: Check out
@@ -44,11 +43,14 @@ jobs:
       - name: Run compatibility smoke
         env:
           HEADROOM_PYTHON: ${{ steps.python.outputs.python-path }}
+          E2E_RESULT_PATH: ${{ runner.temp }}/compatibility-smoke-result.json
         run: node --experimental-strip-types e2e/smoke.ts
 
       - name: Summarize smoke result
         if: always()
         shell: bash
+        env:
+          E2E_RESULT_PATH: ${{ runner.temp }}/compatibility-smoke-result.json
         run: |
           node --input-type=module <<'NODE'
           import { appendFileSync, existsSync, readFileSync } from 'node:fs';
@@ -92,6 +94,8 @@ jobs:
       - name: Upload sanitized smoke result
         if: always()
         uses: actions/upload-artifact@v4
+        env:
+          E2E_RESULT_PATH: ${{ runner.temp }}/compatibility-smoke-result.json
         with:
           name: compatibility-smoke-result
           path: ${{ env.E2E_RESULT_PATH }}
