@@ -1,0 +1,49 @@
+{
+  "name": "pi-make-headroom",
+  "version": "0.1.0",
+  "description": "Make Headroom! Managed Headroom context compression for Pi: pinned Python venv, lazy setup, no npm dependencies.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "headroom",
+    "context",
+    "compression",
+    "managed",
+    "venv",
+    "lazy",
+    "make-headroom"
+  ],
+  "type": "module",
+  "main": "./src/index.ts",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\""
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Cirius1792/pi-make-headroom.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Cirius1792/pi-make-headroom/issues"
+  },
+  "homepage": "https://github.com/Cirius1792/pi-make-headroom#readme",
+  "author": "Cirius1792"
+}
