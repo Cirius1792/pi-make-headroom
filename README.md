@@ -30,21 +30,47 @@ The name is a pun: it makes headroom in your context window, and on first run it
 
 ## Install
 
-From npm:
+### From npm
 
 ```bash
 pi install npm:pi-make-headroom
 ```
 
-Or from a local checkout:
+### From Git
+
+Install the latest `main`:
+
+```bash
+pi install git:github.com/Cirius1792/pi-make-headroom
+```
+
+Pin a tag or commit for a reproducible install:
+
+```bash
+pi install git:github.com/Cirius1792/pi-make-headroom@<tag-or-commit>
+```
+
+Update a Git install:
+
+```bash
+pi update git:github.com/Cirius1792/pi-make-headroom
+```
+
+### From a local checkout
 
 ```bash
 pi install /path/to/pi-make-headroom
 ```
 
-Or try it for one run without adding it to settings:
+### Try it for one run
+
+Without adding it to settings:
 
 ```bash
+pi -e npm:pi-make-headroom
+# or
+pi -e git:github.com/Cirius1792/pi-make-headroom
+# or
 pi -e /path/to/pi-make-headroom
 ```
 
