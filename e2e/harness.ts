@@ -469,9 +469,13 @@ export async function runSmokeChecks(result: SmokeResult, owner: OwnedResources,
     }
   }
   try { await owner.cleanup(); result.cleanup.status = "passed"; }
-  catch {
+  catch (cleanupError) {
     result.cleanup.status = "failed";
-    if (!result.failure) recordSmokeFailure(result, new SmokeFailure("cleanup", "cleanup", "Run-owned resource cleanup failed"), "cleanup");
+    // Cleanup errors use fixed literals only; surfacing them keeps remote
+    // diagnosis actionable without exposing process output or file names.
+    const detail = cleanupError instanceof Error && cleanupError.message.startsWith("cleanup: ")
+      ? cleanupError.message : "Run-owned resource cleanup failed";
+    if (!result.failure) recordSmokeFailure(result, new SmokeFailure("cleanup", "cleanup", detail), "cleanup");
   }
   if (!result.failure && result.cleanup.status === "passed" && Object.values(result.checks).every(c => c.status === "passed")) result.outcome = "passed";
 }
