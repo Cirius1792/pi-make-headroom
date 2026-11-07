@@ -268,6 +268,8 @@ export class OwnedResources {
     // and removal. Neither a hook nor one stalled /proc record can spend them all.
     const passMs = Math.max(0, stopAt - reserve - orderlyUntil) / 4;
     let failed = false;
+    const reasons = new Set<string>();
+    const fail = (reason: string) => { failed = true; reasons.add(reason); };
     let survivors = false;
     const within = async <T>(action: () => Promise<T>, until = stopAt): Promise<T> => {
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -279,7 +281,7 @@ export class OwnedResources {
       } finally { clearTimeout(timer); }
     };
     const bounded = async (action: () => Promise<void>, until = stopAt) => {
-      try { await within(action, until); } catch { failed = true; }
+      try { await within(action, until); } catch { fail("bounded"); }
     };
     const inspect = (pid: number, until: number) => within(() => this.proc.read(pid), Math.min(until, this.now() + 100));
     // Bound /proc traffic so a large host cannot starve per-record deadlines.
@@ -296,10 +298,10 @@ export class OwnedResources {
           try {
             const record = await inspect(pid, until);
             if (record && record.pid === pid) records.push(record);
-            else if (record) failed = true;
-          } catch { failed = true; } // timeouts also leave other verified records usable
+            else if (record) fail("record");
+          } catch { fail("inspect"); } // timeouts also leave other verified records usable
         });
-      } catch { failed = true; }
+      } catch { fail("list"); }
       return selectOwnedProcesses(records, this.runId, this.uid);
     };
     const pause = async (ms: number, until: number) => {
@@ -324,17 +326,17 @@ export class OwnedResources {
           if (identities.get(record.pid) !== record.startTime) return;
           let current: ProcRecord | null;
           try { current = await inspect(record.pid, until); }
-          catch { failed = true; return; }
-          if (this.now() >= until) { failed = true; return; }
+          catch { fail("revalidate"); return; }
+          if (this.now() >= until) { fail("expired"); return; }
           if (!current || current.pid !== record.pid || current.startTime !== record.startTime ||
               selectOwnedProcesses([current], this.runId, this.uid).length !== 1) return;
           try { this.proc.signal(record.pid, signal); }
-          catch (error) { if (!gone(error)) failed = true; }
+          catch (error) { if (!gone(error)) fail("signal"); }
         });
         await pause(200, until);
       }
       survivors = (await scan(stopAt - reserve)).length > 0;
-    } catch { failed = true; }
+    } catch { fail("unexpected"); }
     finally {
       for (const resource of [...this.resources].reverse()) if (resource.remove) await bounded(resource.remove);
       for (const child of this.children) {
@@ -348,7 +350,7 @@ export class OwnedResources {
       }
     }
     if (survivors) throw new Error("cleanup: owned processes remain");
-    if (failed) throw new Error("cleanup: resource failure");
+    if (failed) throw new Error(`cleanup: resource failure (${[...reasons].sort().join(",")})`);
   }
 }
 

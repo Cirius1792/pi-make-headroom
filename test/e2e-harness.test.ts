@@ -395,7 +395,7 @@ test("cleanup still kills marked processes and finalizes resources when orderly 
   const { owner, proc } = resources();
   let removed = false;
   owner.registerResource(async () => { throw new Error("secret-server-error"); }, async () => { removed = true; });
-  await assert.rejects(owner.cleanup(), /^Error: cleanup: resource failure$/);
+  await assert.rejects(owner.cleanup(), /^Error: cleanup: resource failure(?: \([a-z,]+\))?$/);
   assert.equal(removed, true);
   assert.deepEqual(proc.signals, [[100, "SIGTERM"], [100, "SIGKILL"]]);
 });
@@ -491,7 +491,7 @@ for (const stall of ["discovery", "revalidation"] as const) {
     const signal = proc.signal;
     proc.signal = (pid, sig) => { signalled.push([pid, sig, readableReads]); signal(pid, sig); };
     const owner = new OwnedResources({ runId: "owned", uid: 42, proc, pause: async () => {}, signals: false });
-    const pending = assert.rejects(owner.cleanup(), /^Error: cleanup: resource failure$/);
+    const pending = assert.rejects(owner.cleanup(), /^Error: cleanup: resource failure(?: \([a-z,]+\))?$/);
     await advanceCleanup(t, pending);
     // Two independent reads per signal: discovery followed by identity revalidation.
     assert.deepEqual(signalled, [[200, "SIGTERM", 2], [200, "SIGKILL", 4]]);
@@ -514,7 +514,7 @@ for (const stall of ["stdin", "rpc", "resource"] as const) {
     if (stall === "rpc") owner.registerRpc(() => new Promise(() => {}));
     let removed = false;
     owner.registerResource(stall === "resource" ? () => new Promise(() => {}) : async () => {}, async () => { removed = true; });
-    const pending = assert.rejects(owner.cleanup(), /^Error: cleanup: resource failure$/);
+    const pending = assert.rejects(owner.cleanup(), /^Error: cleanup: resource failure(?: \([a-z,]+\))?$/);
     await advanceCleanup(t, pending);
     assert.deepEqual(proc.signals, [[200, "SIGTERM"], [200, "SIGKILL"]]);
     assert.equal(proc.records.has(200), false);
@@ -528,7 +528,7 @@ test("an unreadable proc record cannot prevent cleanup of other verified owned d
   const read = proc.read;
   proc.read = pid => pid === 100 ? Promise.reject(new Error("private-process-detail")) : read(pid);
   const owner = new OwnedResources({ runId: "owned", uid: 42, proc, pause: async () => {}, signals: false });
-  await assert.rejects(owner.cleanup(), /^Error: cleanup: resource failure$/);
+  await assert.rejects(owner.cleanup(), /^Error: cleanup: resource failure(?: \([a-z,]+\))?$/);
   assert.deepEqual(proc.signals, [[200, "SIGTERM"], [200, "SIGKILL"]]);
 });
 
