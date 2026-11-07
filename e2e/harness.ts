@@ -165,8 +165,8 @@ export class OwnedResources {
   }
 
   timeout(stage: keyof typeof CAPS): number {
-    // Reserve the final five seconds of the overall deadline for cleanup.
-    const remaining = this.deadline - this.now() - 5_000;
+    // Reserve fifteen seconds INSIDE the thirty-minute absolute deadline.
+    const remaining = this.deadline - this.now() - 15_000;
     if (remaining <= 0) throw new Error("deadline: run expired");
     return Math.min(CAPS[stage], remaining);
   }
@@ -176,7 +176,7 @@ export class OwnedResources {
     this.deadlineTimer ??= setTimeout(() => {
       process.exitCode = 1;
       void this.cleanup().catch(() => {});
-    }, Math.max(1, this.deadline - this.now() - 5_000));
+    }, Math.max(1, this.deadline - this.now() - 15_000));
     if (this.options.signals !== false && !this.installedSignals) {
       process.on("SIGINT", this.onInterrupt);
       process.on("SIGTERM", this.onTerminate);
@@ -256,7 +256,7 @@ export class OwnedResources {
 
   private async performCleanup(): Promise<void> {
     const startedAt = this.now();
-    const stopAt = Math.min(this.deadline, startedAt + 5_000);
+    const stopAt = Math.min(this.deadline, startedAt + 15_000);
     const reserve = Math.max(0, stopAt - startedAt) / 10;
     const orderlyUntil = startedAt + reserve;
     // Separate budgets for orderly close, three escalation passes, final discovery,
@@ -354,6 +354,116 @@ export function runOwned(command: string, args: string[], options: RunOptions): 
   return (defaultOwner ??= new OwnedResources()).runOwned(command, args, options);
 }
 export async function cleanupOwned(): Promise<void> { await defaultOwner?.cleanup(); }
+
+type HistoryMessage = { role: string; content: unknown };
+
+/** Text-only smoke fixtures: unsupported content is an assertion failure, never a lossy coercion. */
+export function fixtureText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content) && content.length > 0 && content.every(part =>
+    part && part.type === "text" && typeof part.text === "string")) return content.map(part => part.text).join("");
+  throw new Error("assertion: expected text-only fixture");
+}
+
+export function assertCompressedHistory(original: HistoryMessage[], upstream: HistoryMessage[], targetPrompt: string): { beforeChars: number; afterChars: number } {
+  const conversation = (messages: HistoryMessage[]) => messages.filter(m => !["system", "developer"].includes(m.role));
+  const before = conversation(original);
+  const after = conversation(upstream);
+  if (!targetPrompt || before.length === 0 || before.length % 2 !== 0 || after.length !== before.length + 1 ||
+      after.at(-1)?.role !== "user" || fixtureText(after.at(-1)?.content) !== targetPrompt) {
+    throw new Error("assertion: target or conversation layout mismatch");
+  }
+  let beforeChars = 0;
+  let afterChars = 0;
+  const anchors = new Set<string>([targetPrompt]);
+  for (let i = 0; i < before.length; i++) {
+    const role = i % 2 === 0 ? "user" : "assistant";
+    if (before[i].role !== role || after[i].role !== role) throw new Error("assertion: conversation roles mismatch");
+    const a = fixtureText(before[i].content);
+    const b = fixtureText(after[i].content);
+    if (!a || !b) throw new Error("assertion: missing fixture text");
+    if (role === "user") {
+      if (anchors.has(a) || a !== b) throw new Error("assertion: user anchors missing or reordered");
+      anchors.add(a);
+    } else {
+      beforeChars += a.length;
+      afterChars += b.length;
+    }
+  }
+  if (afterChars >= beforeChars) throw new Error("assertion: historical assistant text was not reduced");
+  return { beforeChars, afterChars };
+}
+
+export function assertTargetCompression(original: HistoryMessage[], upstream: HistoryMessage[], targetPrompt: string, savedTokensBefore: number, savedTokensAfter: number) {
+  const lengths = assertCompressedHistory(original, upstream, targetPrompt);
+  if (![savedTokensBefore, savedTokensAfter].every(n => Number.isSafeInteger(n) && n >= 0) || savedTokensAfter <= savedTokensBefore) {
+    throw new Error("assertion: no positive target-turn token savings");
+  }
+  return { ...lengths, savedTokensBefore, savedTokensAfter, targetSavedTokens: savedTokensAfter - savedTokensBefore };
+}
+
+export function assertCompletedTurn(message: Record<string, unknown>, state: Record<string, unknown>, expected: string): void {
+  if (message.role !== "assistant" || message.stopReason !== "stop" || fixtureText(message.content) !== expected ||
+      state.isStreaming !== false || state.isCompacting !== false || state.pendingMessageCount !== 0) {
+    throw new Error("assertion: expected completed assistant turn and idle state");
+  }
+}
+
+export type FailureCategory = "input" | "provisioning" | "environment" | "protocol" | "assertion" | "timeout" | "cleanup";
+export class SmokeFailure extends Error {
+  readonly stage: string;
+  readonly category: FailureCategory;
+  // Only harness-owned literals may be supplied here, never exception/command/request text.
+  constructor(stage: string, category: FailureCategory, message: string) {
+    super(message); this.stage = stage; this.category = category;
+  }
+}
+type CheckName = "installation" | "healthStatus" | "compression";
+type Check = { status: "passed" | "failed" | "not_run" };
+export interface SmokeResult {
+  schemaVersion: 1;
+  extensionCommit: string;
+  requested: { piVersion: string; headroomVersion: string };
+  actual: { piVersion?: string; headroomVersion?: string; nodeVersion: string; pythonVersion?: string };
+  checks: Record<CheckName, Check>;
+  outcome: "passed" | "failed";
+  failure?: { stage: string; category: FailureCategory; message: string };
+  compression?: ReturnType<typeof assertTargetCompression>;
+  cleanup: Check;
+}
+export function createSmokeResult(extensionCommit: string, requested: SmokeResult["requested"]): SmokeResult {
+  return {
+    schemaVersion: 1, extensionCommit, requested, actual: { nodeVersion: process.version },
+    checks: { installation: { status: "not_run" }, healthStatus: { status: "not_run" }, compression: { status: "not_run" } },
+    outcome: "failed", cleanup: { status: "not_run" },
+  };
+}
+export function recordSmokeFailure(result: SmokeResult, error: unknown, stage: string): void {
+  result.outcome = "failed";
+  result.failure = error instanceof SmokeFailure
+    ? { stage: error.stage, category: error.category, message: error.message }
+    : { stage, category: "protocol", message: "Smoke operation failed; raw diagnostics withheld" };
+}
+
+/** The same prerequisite/cleanup gate is exercised offline and used by the live runner. */
+export async function runSmokeChecks(result: SmokeResult, owner: OwnedResources, steps: Record<CheckName, () => Promise<void>>): Promise<void> {
+  for (const name of ["installation", "healthStatus", "compression"] as const) {
+    try {
+      await steps[name]();
+      result.checks[name].status = "passed";
+    } catch (error) {
+      result.checks[name].status = "failed";
+      recordSmokeFailure(result, error, name);
+      break;
+    }
+  }
+  try { await owner.cleanup(); result.cleanup.status = "passed"; }
+  catch {
+    result.cleanup.status = "failed";
+    if (!result.failure) recordSmokeFailure(result, new SmokeFailure("cleanup", "cleanup", "Run-owned resource cleanup failed"), "cleanup");
+  }
+  if (!result.failure && result.cleanup.status === "passed" && Object.values(result.checks).every(c => c.status === "passed")) result.outcome = "passed";
+}
 
 type RecordValue = Record<string, unknown>;
 interface Waiter {

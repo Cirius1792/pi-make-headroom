@@ -8,6 +8,11 @@ import {
   selectOwnedProcesses, validateVersions,
 } from "../e2e/harness.ts";
 import { createMockLlm, encodeAssistantSse } from "../e2e/mock-llm.ts";
+import * as harness from "../e2e/harness.ts";
+import * as smoke from "../e2e/smoke.ts";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 // Only the OS boundaries are faked: no sockets, package installs, or real children.
 class FakeChild extends EventEmitter {
@@ -67,12 +72,12 @@ const runOptions = { cwd: "/disposable", env: { PATH: "/bin" }, timeoutMs: 30_00
 async function advanceCleanup(t: import("node:test").TestContext, pending: Promise<void>) {
   let settled = false;
   void pending.then(() => { settled = true; }, () => { settled = true; });
-  for (let elapsed = 0; elapsed < 5_000 && !settled; elapsed += 10) {
+  for (let elapsed = 0; elapsed < 15_000 && !settled; elapsed += 10) {
     for (let i = 0; i < 40; i++) await Promise.resolve();
     t.mock.timers.tick(10);
   }
   for (let i = 0; i < 40; i++) await Promise.resolve();
-  assert.equal(settled, true, "cleanup must settle within its five-second bound");
+  assert.equal(settled, true, "cleanup must settle within its fifteen-second bound");
   await pending;
 }
 
@@ -189,7 +194,7 @@ test("operation caps and the shared deadline prevent late spawns", async t => {
   assert.equal(owner.timeout("rpc"), 30_000);
   assert.equal(owner.timeout("prompt"), 120_000);
   assert.equal(owner.timeout("provision"), 300_000);
-  now = 994_000; // five seconds are reserved for cleanup
+  now = 984_000; // fifteen seconds are reserved inside the overall deadline
   assert.ok(owner.timeout("provision") <= 1_000);
   now = 999_000;
   assert.throws(() => owner.spawnOwned("npm", [], runOptions), /deadline/);
@@ -421,7 +426,7 @@ test("run deadline triggers automatic cleanup even while the caller is idle", as
   const child = new FakeChild();
   const owner = new OwnedResources({
     runId: "owned", uid: 42, proc, pause: async () => {}, signals: false,
-    now: () => 0, deadline: 10_000, spawn: () => childType(child),
+    now: () => 0, deadline: 20_000, spawn: () => childType(child),
   });
   owner.spawnOwned("pi", [], runOptions);
   t.mock.timers.tick(5_000);
@@ -473,7 +478,7 @@ for (const stall of ["discovery", "revalidation"] as const) {
     // Two independent reads per signal: discovery followed by identity revalidation.
     assert.deepEqual(signalled, [[200, "SIGTERM", 2], [200, "SIGKILL", 4]]);
     assert.equal(proc.records.has(200), false);
-    assert.ok(Date.now() <= 5_000);
+    assert.ok(Date.now() <= 15_000);
   });
 }
 
@@ -496,7 +501,7 @@ for (const stall of ["stdin", "rpc", "resource"] as const) {
     assert.deepEqual(proc.signals, [[200, "SIGTERM"], [200, "SIGKILL"]]);
     assert.equal(proc.records.has(200), false);
     assert.equal(removed, true);
-    assert.ok(Date.now() <= 5_000);
+    assert.ok(Date.now() <= 15_000);
   });
 }
 
@@ -586,6 +591,148 @@ test("mock rejects malformed JSON and oversized bodies without retaining raw pay
   }
   assert.equal(mock.requests.length, 0);
   assert.equal((await request(mock, llmRequest)).status, 200);
+});
+
+test("live workspace supplies explicit isolated child homes and removes its disposable tree", async () => {
+  const allocated = await smoke.createSmokeWorkspace({ piVersion: "1.5.0", headroomVersion: "0.42.0" }, { PATH: "/usr/bin", OPENAI_API_KEY: "secret" });
+  try {
+    assert.equal(allocated.env.HOME, join(allocated.workspace, "home"));
+    assert.equal(allocated.env.PI_CODING_AGENT_DIR, join(allocated.workspace, "agent"));
+    assert.equal(allocated.env.HEADROOM_HOME, join(allocated.workspace, "managed"));
+    assert.equal(allocated.env.HEADROOM_VERSION, "0.42.0");
+    assert.equal(allocated.env.HEADROOM_URL, undefined);
+    assert.equal(allocated.env.OPENAI_API_KEY, undefined);
+    await access(join(allocated.workspace, "work"));
+  } finally { await allocated.owner.cleanup(); }
+  await assert.rejects(access(allocated.workspace));
+});
+
+test("invalid live input produces only a sanitized failure result before allocating or installing", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "headroom-result-test-"));
+  try {
+    const path = join(directory, "result.json");
+    const result = await smoke.runSmoke({ PI_VERSION: "secret-invalid-input", HEADROOM_VERSION: "0.42.0", E2E_RESULT_PATH: path });
+    assert.equal(result.outcome, "failed");
+    assert.equal(result.failure.category, "input");
+    assert.deepEqual(Object.values(result.checks).map(c => c.status), ["not_run", "not_run", "not_run"]);
+    const persisted = await readFile(path, "utf8");
+    assert.ok(!persisted.includes("secret-invalid-input"));
+    assert.deepEqual(JSON.parse(persisted), result);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("setup diagnosis classifies bounded known failures without echoing raw diagnostics", () => {
+  const cases = [
+    ["private text Tunnel connection failed: 403 Forbidden https://pypi.org/simple secret", "environment", "pypi.org"],
+    ["private connection error https://openaipublic.blob.core.windows.net/encodings/private secret", "environment", "openaipublic.blob.core.windows.net"],
+    ["private CERTIFICATE_VERIFY_FAILED secret", "environment", "certificate"],
+    ["private text ModuleNotFoundError: No module named 'private-module' secret", "provisioning", "Python module"],
+    ["private text No matching distribution found for headroom-ai==0.42.0 secret", "provisioning", "distribution"],
+    ["private text secret", "provisioning", "offline"],
+  ];
+  for (const [text, category, contains] of cases) {
+    const failure = smoke.diagnoseSetupFailure(text);
+    assert.equal(failure.category, category);
+    assert.ok(failure.message.includes(contains));
+    assert.ok(!failure.message.includes("private"));
+    assert.ok(!failure.message.includes("secret"));
+  }
+});
+
+test("saved-token status parser selects cumulative count, not the last-request count", () => {
+  assert.equal(smoke.parseSavedTokens("This session:\n  Saved: 12,345 tokens (50%)\nLast request:\n Saved: 9 (1%)"), 12345);
+  assert.throws(() => smoke.parseSavedTokens("Last request:\nSaved: 9 (1%)"), /assertion:/);
+});
+
+const originalHistory = [
+  { role: "user", content: "anchor-alpha" },
+  { role: "assistant", content: [{ type: "text", text: "redundant alpha ".repeat(100) }] },
+  { role: "user", content: "anchor-beta" },
+  { role: "assistant", content: "redundant beta ".repeat(100) },
+];
+const reducedHistory = [
+  { role: "system", content: "provider boilerplate" },
+  { role: "user", content: "anchor-alpha" },
+  { role: "assistant", content: "alpha summary" },
+  { role: "user", content: [{ type: "text", text: "anchor-beta" }] },
+  { role: "assistant", content: "beta summary" },
+  { role: "user", content: "anchor-target" },
+];
+
+test("compression compares aligned assistant text excluding provider boilerplate", () => {
+  assert.deepEqual(harness.assertCompressedHistory(originalHistory, reducedHistory, "anchor-target"), {
+    beforeChars: 3100, afterChars: 25,
+  });
+});
+
+for (const [name, change] of [
+  ["unchanged history", () => [...originalHistory, { role: "user", content: "anchor-target" }]],
+  ["larger history", () => reducedHistory.map(m => m.role === "assistant" ? { ...m, content: "x".repeat(3000) } : m)],
+  ["removed fixture message", () => reducedHistory.filter((_, i) => i !== 2)],
+  ["empty assistant", () => reducedHistory.map((m, i) => i === 2 ? { ...m, content: "" } : m)],
+  ["role mismatch", () => reducedHistory.map((m, i) => i === 2 ? { ...m, role: "user" } : m)],
+  ["reordered complete turns", () => [reducedHistory[0], ...reducedHistory.slice(3, 5), ...reducedHistory.slice(1, 3), reducedHistory[5]]],
+  ["missing target", () => reducedHistory.slice(0, -1)],
+  ["wrong target", () => reducedHistory.map((m, i) => i === 5 ? { ...m, content: "wrong" } : m)],
+] as const) {
+  test(`compression rejects ${name}`, () => {
+    assert.throws(() => harness.assertCompressedHistory(originalHistory, change(), "anchor-target"), /assertion:/);
+  });
+}
+
+test("positive target savings cannot excuse unchanged upstream history", () => {
+  assert.throws(() => harness.assertTargetCompression(originalHistory,
+    [...originalHistory, { role: "user", content: "anchor-target" }], "anchor-target", 20, 30), /assertion:/);
+});
+
+test("shorter upstream history cannot excuse zero target savings", () => {
+  assert.throws(() => harness.assertTargetCompression(originalHistory, reducedHistory, "anchor-target", 20, 20), /assertion:/);
+  assert.deepEqual(harness.assertTargetCompression(originalHistory, reducedHistory, "anchor-target", 20, 31), {
+    beforeChars: 3100, afterChars: 25, savedTokensBefore: 20, savedTokensAfter: 31, targetSavedTokens: 11,
+  });
+});
+
+test("completed model work requires exact assistant text, successful stop and idle without queued work", () => {
+  const message = { role: "assistant", content: [{ type: "text", text: "expected" }], stopReason: "stop" };
+  const state = { isStreaming: false, isCompacting: false, pendingMessageCount: 0 };
+  harness.assertCompletedTurn(message, state, "expected");
+  for (const [m, s] of [
+    [{ ...message, stopReason: "error" }, state], [{ ...message, content: "wrong" }, state],
+    [message, { ...state, isStreaming: true }], [message, { ...state, pendingMessageCount: 1 }],
+    [message, { ...state, isCompacting: true }], [message, {}],
+  ]) assert.throws(() => harness.assertCompletedTurn(m, s, "expected"), /assertion:/);
+});
+
+test("failure after allocation leaves later checks not_run and runs all cleanup without raw errors", async () => {
+  const owner = new OwnedResources({ proc: fakeProc(), uid: 42, signals: false, pause: async () => {} });
+  const cleaned: string[] = [];
+  const result = harness.createSmokeResult("a".repeat(40), { piVersion: "1.5.0", headroomVersion: "0.42.0" });
+  await harness.runSmokeChecks(result, owner, {
+    installation: async () => {
+      owner.registerResource(async () => { cleaned.push("socket"); }, async () => { cleaned.push("workspace"); });
+      owner.registerRpc(async () => { cleaned.push("rpc"); });
+      throw new Error("raw secret output must not escape");
+    },
+    healthStatus: async () => assert.fail("must not run"), compression: async () => assert.fail("must not run"),
+  });
+  assert.equal(result.outcome, "failed");
+  assert.deepEqual(result.checks, { installation: { status: "failed" }, healthStatus: { status: "not_run" }, compression: { status: "not_run" } });
+  assert.deepEqual(cleaned.sort(), ["rpc", "socket", "workspace"]);
+  assert.equal(result.failure.stage, "installation");
+  assert.ok(!JSON.stringify(result).includes("raw secret"));
+  assert.equal(result.cleanup.status, "passed");
+});
+
+test("normal cleanup failure cannot produce a passing smoke result", async () => {
+  const owner = new OwnedResources({ proc: fakeProc(), uid: 42, signals: false, pause: async () => {} });
+  owner.registerResource(async () => { throw new Error("sensitive raw detail"); });
+  const result = harness.createSmokeResult("a".repeat(40), { piVersion: "1.5.0", headroomVersion: "0.42.0" });
+  await harness.runSmokeChecks(result, owner, {
+    installation: async () => {}, healthStatus: async () => {}, compression: async () => {},
+  });
+  assert.equal(result.outcome, "failed");
+  assert.equal(result.failure.category, "cleanup");
+  assert.equal(result.cleanup.status, "failed");
 });
 
 test("mock fails unexpected routes/methods/shapes without consuming the next reply", async () => {
