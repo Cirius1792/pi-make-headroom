@@ -40,7 +40,7 @@ import type { CompressResult, LastCompression, SessionTotals } from "./types.ts"
 // Configuration
 // ---------------------------------------------------------------------------
 
-const DEFAULT_VERSION = "0.42.0";
+const DEFAULT_VERSION = "0.43.1";
 const DEFAULT_EXTRAS = "proxy";
 const DEFAULT_PORT = 8788;
 const DEFAULT_HOST = "127.0.0.1";

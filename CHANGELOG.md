@@ -2,9 +2,12 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-08
+
 - Added nightly PyPI discovery and tested Headroom update PRs: fixed Pi 1.5.0/Python 3.11 compatibility smoke, minor extension-version bumps, and draft PRs when validation fails.
 - Added automatic exact-commit tags and explicit trusted-release dispatch after validated version increases reach `main`; normal commits do not publish.
 - Documented Python 3.11+ as the supported minimum and clarified that explicit configuration pins survive extension updates.
+- Updated the default Headroom pin from `0.42.0` to `0.43.1`.
 
 ## [0.1.1] - 2026-11-08
 
