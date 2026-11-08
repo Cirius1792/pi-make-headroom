@@ -121,7 +121,7 @@ The next session rebuilds the venv from scratch. This is safe: the directory hol
 ## Remove the extension
 
 ```bash
-pi remove npm:pi-make-headroom   # or the git: or local path you installed from
+pi remove npm:@cltec/pi-make-headroom # or the git: or local path you installed from
 rm -rf ~/.pi/agent/make-headroom
 ```
 

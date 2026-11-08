@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Renamed the npm package to `@cltec/pi-make-headroom`; remove previous unscoped npm installations before switching to avoid duplicate compression.
+- Added tag-triggered npm trusted publishing and GitHub Releases showing the default Headroom version from the tagged source, plus a maintainer release guide.
 - Added a manual `Compatibility smoke` workflow and maintainer guide for checking an exact Pi / Headroom version pair with the packed checkout, real managed Headroom, and a local mock LLM; publishes a sanitized result without implying a full compatibility guarantee.
 - Restructured `README.md` as a landing page: quick start, requirements, install variants, status line, commands, and links.
 - Added `docs/CONFIGURATION.md`: all 16 environment variables, the `config.json` schema, validation rules, version and Python pins, and tuning.

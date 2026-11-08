@@ -1,6 +1,6 @@
 <!-- FOR AI AGENTS - Human readability is a side effect, not a goal -->
 <!-- Managed by agent: keep sections and order; edit content, not structure -->
-<!-- Last updated: 2026-11-07 | Last verified: 2026-11-07 -->
+<!-- Last updated: 2026-11-08 | Last verified: 2026-11-07 -->
 
 # AGENTS.md
 
@@ -72,7 +72,7 @@
 - Strip-only mode does not support parameter properties, enums, or namespaces. Use plain fields and string unions.
 - Use `import type` for `@earendil-works/pi-*` imports.
 - `npm pack --dry-run` must show only `src/`, `README.md`, `LICENSE`, `CHANGELOG.md`, and `package.json`.
-- The package name is `pi-make-headroom`; do not install the old `pi-headroom` package alongside it.
+- The package name is `@cltec/pi-make-headroom`; do not install the previous `pi-make-headroom` or original `pi-headroom` npm package alongside it.
 
 ## Scoped AGENTS.md
 - `./src/AGENTS.md` — source invariants and conventions.
