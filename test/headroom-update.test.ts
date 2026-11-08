@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { githubRequest } from '../scripts/automation-github.mjs';
@@ -18,9 +18,17 @@ function fixture() {
   };
   const ref = (name: string) => { try { return git(['--git-dir', remote, 'rev-parse', '--verify', `refs/heads/${name}`]); } catch { return null; } };
   git(['init', '-b', 'main']); git(['config', 'user.name', 'github-actions[bot]']); git(['config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com']);
-  for (const path of ['src/index.ts', 'package.json', 'README.md', 'docs/CONFIGURATION.md', 'CHANGELOG.md']) {
+  // Fixed historical inputs, independent of whichever pin/version CI is testing.
+  const baseFiles = {
+    'src/index.ts': 'const DEFAULT_VERSION = "0.42.0";\n',
+    'package.json': JSON.stringify({ name: '@cltec/pi-make-headroom', version: '0.1.1', type: 'module' }),
+    'README.md': 'Default `headroom-ai[proxy]==0.42.0`.\nInstalls `headroom-ai[proxy]==0.42.0`.\n| `HEADROOM_VERSION` | `0.42.0` | default |\n',
+    'docs/CONFIGURATION.md': '```json\n{\n  "version": "0.42.0",\n  "extras": "proxy"\n}\n```\n| `HEADROOM_VERSION` | `0.42.0` | default |\n',
+    'CHANGELOG.md': '# Changelog\n\n## [Unreleased]\n\n## [0.1.1] - 2026-11-08\n\n- Previous release.\n',
+  };
+  for (const [path, content] of Object.entries(baseFiles)) {
     mkdirSync(dirname(join(cwd, path)), { recursive: true });
-    writeFileSync(join(cwd, path), readFileSync(new URL(`../${path}`, import.meta.url)));
+    writeFileSync(join(cwd, path), content);
   }
   git(['add', '.']); git(['commit', '-m', 'base']);
   git(['init', '--bare', remote]); git(['remote', 'add', 'origin', remote]); git(['push', 'origin', 'HEAD:refs/heads/main']);

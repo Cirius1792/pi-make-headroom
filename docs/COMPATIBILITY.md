@@ -11,6 +11,8 @@ Use this maintainer smoke check before proposing a Pi or Headroom upgrade. One i
 
 The current baseline, Pi `1.5.0` with Headroom `0.42.0`, passed locally from fresh workspaces on Node `22.19.0` / Python `3.11.15` and remotely in GitHub Actions on Node `22.23.4` / Python `3.11.18` (run [42420707705](https://github.com/Cirius1792/pi-make-headroom/actions/runs/42420707705), extension `805120c`). All three checks and cleanup passed; target-turn savings were `32346` tokens (`101580` to `174` historical assistant characters), and the artifact matched the job summary. This is a validated baseline for these fixed runtimes, not a guarantee for other versions or environments.
 
+An additional local `act 0.2.97` candidate trial on 2026-11-08 passed with **Pi `1.5.0` / Headroom `0.43.1`**, Node `22.23.4`, and Python `3.11.18`. Installation, health/status, compression, and cleanup all passed; target-turn savings were `32346` tokens (`101580` to `174` historical assistant characters). This used an isolated synthetic version-bump commit and a local checkout adapter because the commit was unpublished. Reusable CI passed 151 tests on both Node 22 and 24, and release archive preparation/local artifact transfer passed. Remote tagging stopped at the real-main ancestry guard; no publication occurred. This is local candidate evidence, not proof of GitHub permissions, real PR transitions, or npm OIDC.
+
 ## Automated Headroom update checks
 
 The **Headroom update** workflow checks PyPI nightly at **03:17 UTC** (best-effort scheduling), or when manually dispatched. It considers only the newest stable non-yanked `headroom-ai` release newer than the built-in default, not each intervening release. Registry failures fail the run rather than pretending that no upgrade exists.
