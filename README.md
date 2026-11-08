@@ -34,7 +34,7 @@ The first run downloads Headroom and its proxy dependencies, which takes a few m
 | Requirement | Detail |
 | --- | --- |
 | Pi | 1.5 or newer. |
-| Python | 3.10 or newer on `PATH`, or set `HEADROOM_PYTHON`. Headroom 0.43+ needs 3.11+. |
+| Python | **3.11 or newer** on `PATH`, or set `HEADROOM_PYTHON`. This is the supported minimum for Headroom upgrades. |
 | Network | Needed on the first run so pip can populate the venv. |
 | Disk | One venv with Headroom and its proxy dependencies, under `~/.pi/agent/make-headroom`. |
 | Node | Nothing to install: the extension has no runtime npm dependencies. |
@@ -80,7 +80,7 @@ pi update npm:@cltec/pi-make-headroom
 pi update git:github.com/Cirius1792/pi-make-headroom
 ```
 
-Updating the extension does not change the Headroom pin. Versions are chosen by `HEADROOM_VERSION` or `config.json`, so a new extension release keeps the version you pinned.
+An extension release can update the built-in Headroom pin. Explicit `HEADROOM_VERSION` or `config.json` versions—including a version in the starter config written on first run—are preserved and take precedence over that default. Change your configuration if you want to adopt a newer pin.
 
 ### Remove
 
@@ -182,7 +182,7 @@ Details and reporting: [SECURITY.md](SECURITY.md).
 ## Troubleshooting
 
 `⚠ Headroom offline` → read `~/.pi/agent/make-headroom/proxy.log`, then run `/headroom reinstall`.
-`Python 3.10+ was not found` → install a newer Python, or set `HEADROOM_PYTHON`; on Debian/Ubuntu add `python3-venv`.
+`Python … was not found` → install Python **3.11+**, or set `HEADROOM_PYTHON`; on Debian/Ubuntu add `python3-venv`. The exact error depends on the selected Headroom pin.
 `pip install failed` → `~/.pi/agent/make-headroom/install.log` has the full output; check the pin exists on PyPI.
 
 For savings that stay at zero, lock timeouts, leftover proxies, a full reset, and removing the extension: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
@@ -194,8 +194,8 @@ For savings that stay at zero, lock timeouts, leftover proxies, a full reset, an
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every environment variable, `config.json`, validation, tuning. |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Symptom-by-symptom fixes, logs, reset, uninstall. |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System context, lifecycle, modules, failure modes. |
-| [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | Run the manual Pi / Headroom version-pair smoke check. |
-| [docs/RELEASING.md](docs/RELEASING.md) | Configure npm trusted publishing and release a tagged version. |
+| [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | Manual smoke checks and nightly tested Headroom update PRs. |
+| [docs/RELEASING.md](docs/RELEASING.md) | Configure trusted publishing and automatic releases after version-bump merges. |
 | [docs/adr/](docs/adr/) | Architecture decision records. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, tests, PR workflow, coding standards. |
 | [AGENTS.md](AGENTS.md) | Agent instructions: verified commands, invariants, boundaries. |

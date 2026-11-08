@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Added nightly PyPI discovery and tested Headroom update PRs: fixed Pi 1.5.0/Python 3.11 compatibility smoke, minor extension-version bumps, and draft PRs when validation fails.
+- Added automatic exact-commit tags and explicit trusted-release dispatch after validated version increases reach `main`; normal commits do not publish.
+- Documented Python 3.11+ as the supported minimum and clarified that explicit configuration pins survive extension updates.
+
 ## [0.1.1] - 2026-11-08
 
 - Renamed the npm package to `@cltec/pi-make-headroom`; remove previous unscoped npm installations before switching to avoid duplicate compression.

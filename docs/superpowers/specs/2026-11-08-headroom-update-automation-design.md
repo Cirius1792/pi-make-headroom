@@ -1,6 +1,6 @@
 # Automated Headroom updates and releases
 
-Status: proposed for approval. No automation is implemented by this document.
+Status: approved by the maintainer in conversation on 2026-11-08. Implementation is pending; this document alone does not install automation.
 
 ## Intent
 

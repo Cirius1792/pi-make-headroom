@@ -32,7 +32,7 @@ You can add the remaining keys yourself. Every key is optional:
 | `startTimeoutMs` | number | `HEADROOM_START_TIMEOUT_MS` | Integer, 1000–3600000. |
 | `url` | string | `HEADROOM_URL` | Must start with `http://` or `https://`; trailing slashes are stripped. |
 
-`config.json` is re-read at every `session_start`, so edits take effect on the next Pi session, not mid-session.
+`config.json` is re-read at every `session_start`, so edits take effect on the next Pi session, not mid-session. An explicit `version`, including the starter value written on first run, overrides future changes to the extension's built-in pin. Updating the extension does not rewrite this file.
 
 Two values are sanitized for safety rather than rejected: `HEADROOM_HOME` pointing at a filesystem root (`/` or `C:\`) falls back to the default home, because `/headroom reinstall` deletes `<home>/venv`.
 
@@ -87,7 +87,9 @@ The proxy and the installer are spawned with a copy of your environment, so vari
 
 ## Version pins and Python
 
-The installed version, not the environment, decides the Python floor:
+**Python 3.11+ is the supported minimum**, including the nightly compatibility check. Use an interpreter that also satisfies the selected Headroom release's `Requires-Python` metadata.
+
+For backward compatibility, the installer retains these version-dependent technical floors for older explicit pins; this does not extend the supported baseline below Python 3.11:
 
 | Headroom | Python |
 | --- | --- |
