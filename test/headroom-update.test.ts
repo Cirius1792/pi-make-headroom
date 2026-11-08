@@ -43,18 +43,18 @@ function fixture() {
     if (path === '/git/commits') return { sha: git(['commit-tree', body.tree, '-p', body.parents[0], '-m', body.message]) };
     if (path.startsWith('/pulls?')) {
       for (const pr of prs) if (pr.state === 'open') pr.head.sha = ref(pr.head.ref);
-      return new URLSearchParams(path.split('?')[1]).get('page') === '1' ? prs : [];
+      return new URLSearchParams(path.split('?')[1]).get('page') === '1' ? structuredClone(prs) : [];
     }
     if (path.startsWith('/pulls/') && method === 'GET') {
       const pr = prs.find(p => p.number === Number(path.split('/').at(-1)));
       if (pr?.state === 'open') pr.head.sha = ref(pr.head.ref);
-      return pr ?? null;
+      return pr ? structuredClone(pr) : null;
     }
     if (path === '/pulls' && method === 'POST') {
       const pr = { ...body, number: prs.length + 1, node_id: `PR_${prs.length + 1}`, state: 'open', user: { login: 'github-actions[bot]' }, head: { ref: body.head, sha: ref(body.head) }, base: { ref: body.base } };
-      prs.push(pr); return pr;
+      prs.push(pr); return structuredClone(pr);
     }
-    if (path.startsWith('/pulls/') && method === 'PATCH') { const pr = prs.find(p => p.number === Number(path.split('/').at(-1))); Object.assign(pr, body); return pr; }
+    if (path.startsWith('/pulls/') && method === 'PATCH') { const pr = prs.find(p => p.number === Number(path.split('/').at(-1))); Object.assign(pr, body); return structuredClone(pr); }
     if (path === '/graphql') {
       const pr = prs.find(p => p.node_id === body.variables.id);
       pr.draft = body.query.includes('convertPullRequestToDraft'); return { data: {} };
@@ -213,6 +213,23 @@ for (const changed of ['head', 'main', 'closed']) test(`finalization makes no st
     assert.ok(['stale', 'closed'].includes(outcome.action));
     assert.equal(f.prs[0].body, body); assert.equal(f.prs[0].draft, false);
     assert.equal(f.calls.filter(call => call.method !== 'GET').length, beforeWrites);
+  } finally { f.cleanup(); }
+});
+
+test('fresh draft state is respected when a maintainer makes the same head ready during validation', async () => {
+  const f = fixture(); try {
+    const c = await prepareUpdate(f.options, f.deps);
+    const args = { candidate: c, offlineResult: 'failure', smokeResult: 'failure', evidence: null, runUrl: f.options.runUrl };
+    await finalizeUpdate(args, f.deps);
+    assert.equal(f.prs[0].draft, true);
+    let inject = true;
+    const api = async (method: string, path: string, body?: any) => {
+      const response = await f.deps.api(method, path, body);
+      if (path.startsWith('/pulls?') && inject) { inject = false; f.prs[0].draft = false; }
+      return response;
+    };
+    await finalizeUpdate(args, { ...f.deps, api });
+    assert.equal(f.prs[0].draft, true, 'failed validation must demote the latest ready state, not skip based on its old draft snapshot');
   } finally { f.cleanup(); }
 });
 

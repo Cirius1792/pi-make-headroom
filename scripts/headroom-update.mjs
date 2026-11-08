@@ -134,6 +134,7 @@ export async function finalizeUpdate({ candidate: c, offlineResult, smokeResult,
     const current = await api('GET', `/pulls/${pr.number}`);
     if (!current || current.state !== 'open') return { action: 'closed', ready: false };
     if (!owned(current) || current.head.sha !== c.headSha || !await fresh()) return { action: 'stale', ready: false };
+    pr.draft = current.draft;
     return null;
   };
   let pr = open[0], blocked;
