@@ -41,7 +41,15 @@ function fixture() {
       return { sha: git(['write-tree']) };
     }
     if (path === '/git/commits') return { sha: git(['commit-tree', body.tree, '-p', body.parents[0], '-m', body.message]) };
-    if (path.startsWith('/pulls?')) return new URLSearchParams(path.split('?')[1]).get('page') === '1' ? prs : [];
+    if (path.startsWith('/pulls?')) {
+      for (const pr of prs) if (pr.state === 'open') pr.head.sha = ref(pr.head.ref);
+      return new URLSearchParams(path.split('?')[1]).get('page') === '1' ? prs : [];
+    }
+    if (path.startsWith('/pulls/') && method === 'GET') {
+      const pr = prs.find(p => p.number === Number(path.split('/').at(-1)));
+      if (pr?.state === 'open') pr.head.sha = ref(pr.head.ref);
+      return pr ?? null;
+    }
     if (path === '/pulls' && method === 'POST') {
       const pr = { ...body, number: prs.length + 1, node_id: `PR_${prs.length + 1}`, state: 'open', user: { login: 'github-actions[bot]' }, head: { ref: body.head, sha: ref(body.head) }, base: { ref: body.base } };
       prs.push(pr); return pr;
@@ -58,7 +66,7 @@ function fixture() {
   return { root, cwd, git, ref, options, deps, prs, calls, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 function evidence(c: any) {
-  return { schemaVersion: 1, extensionCommit: c.headSha, requested: { piVersion: '1.5.0', headroomVersion: '0.43.1' }, actual: { piVersion: '1.5.0', headroomVersion: '0.43.1', pythonVersion: '3.11.9' }, outcome: 'passed', checks: { installation: { status: 'passed' }, healthStatus: { status: 'passed' }, compression: { status: 'passed' } }, cleanup: { status: 'passed' } };
+  return { schemaVersion: 1, extensionCommit: c.headSha, requested: { piVersion: '1.5.0', headroomVersion: c.headroomVersion }, actual: { piVersion: '1.5.0', headroomVersion: c.headroomVersion, pythonVersion: '3.11.9' }, outcome: 'passed', checks: { installation: { status: 'passed' }, healthStatus: { status: 'passed' }, compression: { status: 'passed' } }, cleanup: { status: 'passed' } };
 }
 
 test('GitHub HTTP adapter handles status and malformed payloads without leaking credentials', async () => {
@@ -163,6 +171,61 @@ test('candidate metadata cannot misrepresent the source and regeneration demotes
     assert.equal(f.prs[0].draft, false);
     await prepareUpdate(f.options, { ...f.deps, fetchPyPI: async () => ({ releases: { '0.44.0': [{ yanked: false }] } }) });
     assert.equal(f.prs[0].draft, true);
+  } finally { f.cleanup(); }
+});
+
+test('closing a regenerated PR rejects its actual candidate despite a stale body marker', async () => {
+  const f = fixture(); try {
+    const a = await prepareUpdate(f.options, f.deps);
+    await finalizeUpdate({ candidate: a, offlineResult: 'success', smokeResult: 'success', evidence: evidence(a), runUrl: f.options.runUrl }, f.deps);
+    const newerDeps = { ...f.deps, fetchPyPI: async () => ({ releases: { '0.44.0': [{ yanked: false }] } }) };
+    const b = await prepareUpdate(f.options, newerDeps);
+    assert.match(f.prs[0].body, /0\.43\.1/);
+    f.prs[0].head.sha = b.headSha;
+    f.prs[0].state = 'closed'; f.prs[0].merged_at = null;
+    const outcome = await finalizeUpdate({ candidate: b, offlineResult: 'success', smokeResult: 'success', evidence: evidence(b), runUrl: f.options.runUrl }, f.deps);
+    assert.equal(outcome.action, 'closed'); assert.equal(f.prs.length, 1);
+    assert.equal(await prepareUpdate(f.options, newerDeps), null);
+  } finally { f.cleanup(); }
+});
+
+for (const changed of ['head', 'main', 'closed']) test(`finalization makes no stale PR mutations when ${changed} changes after its first freshness check`, async () => {
+  const f = fixture(); try {
+    const c = await prepareUpdate(f.options, f.deps);
+    await finalizeUpdate({ candidate: c, offlineResult: 'success', smokeResult: 'success', evidence: evidence(c), runUrl: f.options.runUrl }, f.deps);
+    const body = f.prs[0].body, beforeWrites = f.calls.filter(call => call.method !== 'GET').length;
+    let inject = true;
+    const api = async (method: string, path: string, data?: any) => {
+      const response = await f.deps.api(method, path, data);
+      if (path.startsWith('/pulls?') && inject) {
+        inject = false;
+        if (changed === 'closed') { f.prs[0].state = 'closed'; f.prs[0].merged_at = null; }
+        else {
+          const parent = changed === 'head' ? c.headSha : c.baseSha;
+          const manual = f.git(['commit-tree', f.git(['show', '-s', '--format=%T', parent]), '-p', parent, '-m', 'concurrent edit']);
+          f.git(['push', 'origin', `${manual}:refs/heads/${changed === 'head' ? 'automation/headroom-update' : 'main'}`]);
+        }
+      }
+      return response;
+    };
+    const outcome = await finalizeUpdate({ candidate: c, offlineResult: 'failure', smokeResult: 'failure', evidence: null, runUrl: f.options.runUrl }, { ...f.deps, api });
+    assert.equal(outcome.ready, false);
+    assert.ok(['stale', 'closed'].includes(outcome.action));
+    assert.equal(f.prs[0].body, body); assert.equal(f.prs[0].draft, false);
+    assert.equal(f.calls.filter(call => call.method !== 'GET').length, beforeWrites);
+  } finally { f.cleanup(); }
+});
+
+test('draft summary classifies sanitized setup and assertion failures without copying raw diagnostics', async () => {
+  const f = fixture(); try {
+    const c = await prepareUpdate(f.options, f.deps);
+    for (const category of ['provisioning', 'assertion']) {
+      const report = { ...evidence(c), outcome: 'failed', failure: { stage: 'managed-setup', category, message: '<secret diagnostics>' } };
+      await finalizeUpdate({ candidate: c, offlineResult: 'success', smokeResult: 'failure', evidence: report, runUrl: f.options.runUrl }, f.deps);
+      assert.match(f.prs[0].body, new RegExp(category));
+      assert.match(f.prs[0].body, /managed-setup/);
+      assert.doesNotMatch(f.prs[0].body, /secret diagnostics/);
+    }
   } finally { f.cleanup(); }
 });
 

@@ -28,6 +28,26 @@ async function pullRequests(api, repository) {
   }
   throw new Error('Managed PR history exceeds bounded pagination');
 }
+async function isRejected(prs, candidate, { git }) {
+  for (const pr of prs) {
+    if (pr.state !== 'closed' || pr.merged_at || !owned(pr)) continue;
+    // The PR body can still describe A after the branch was regenerated to B.
+    // GitHub's actual closed head, not that delayed marker, identifies rejection.
+    const sha = requireSha(pr.head.sha);
+    ensureCommit(git, sha);
+    const manifest = JSON.parse(git(['show', `${sha}:package.json`]));
+    const pin = readReleaseMetadata(`v${manifest.version}`, manifest, git(['show', `${sha}:src/index.ts`])).headroomVersion;
+    if (pin === candidate) return true;
+  }
+  return false;
+}
+function evidenceSummary(e, sha) {
+  if (e?.schemaVersion !== 1 || e.extensionCommit !== sha) return 'Smoke evidence: missing, invalid, or stale.';
+  const statuses = ['installation', 'healthStatus', 'compression'].map(name => `${name}: ${['passed', 'failed', 'not_run'].includes(e.checks?.[name]?.status) ? e.checks[name].status : 'unknown'}`);
+  const category = ['input', 'provisioning', 'environment', 'protocol', 'assertion', 'timeout', 'cleanup'].includes(e.failure?.category) ? e.failure.category : 'unknown';
+  const stage = typeof e.failure?.stage === 'string' && /^[a-z][a-z0-9_-]{0,63}$/.test(e.failure.stage) && !e.failure.stage.endsWith('\n') ? e.failure.stage : 'unknown';
+  return `Smoke evidence: ${statuses.join('; ')}.${e.failure ? ` Failure stage: ${stage}; category: ${category}.` : ''}`;
+}
 async function setDraft(api, pr, draft) {
   if (pr.draft === draft) return;
   await api('POST', '/graphql', { query: `mutation($id:ID!) { ${draft ? 'convertPullRequestToDraft' : 'markPullRequestReadyForReview'}(input:{pullRequestId:$id}) { pullRequest { id } } }`, variables: { id: pr.node_id } });
@@ -68,7 +88,7 @@ export async function prepareUpdate(options, deps) {
   const prs = await pullRequests(api, repository);
   const open = prs.filter(p => p.state === 'open');
   if (open.length > 1 || open.some(p => !owned(p))) throw new Error('Unrecognized managed pull request ownership');
-  if (prs.some(p => p.state === 'closed' && !p.merged_at && owned(p) && marker(p).headroomVersion === candidate)) return null;
+  if (await isRejected(prs, candidate, deps)) return null;
   const branch = await api('GET', `/git/ref/heads/${BRANCH}`);
   const previousSha = branch?.object?.sha;
   const previous = previousSha ? await inspectManaged(previousSha, deps) : null;
@@ -104,13 +124,33 @@ export async function finalizeUpdate({ candidate: c, offlineResult, smokeResult,
   const prs = await pullRequests(api, repository);
   const open = prs.filter(p => p.state === 'open');
   if (open.length > 1 || open.some(p => !owned(p))) throw new Error('Unrecognized managed pull request ownership');
-  if (!open.length && prs.some(p => p.state === 'closed' && marker(p)?.headSha === c.headSha)) return { action: 'closed', ready: false };
+  if (!open.length && await isRejected(prs, c.headroomVersion, deps)) return { action: 'closed', ready: false };
   const assessment = assessCompatibility({ offlineResult, smokeResult, evidence, expected: { sha: c.headSha, piVersion: c.piVersion, headroomVersion: c.headroomVersion } });
-  const body = `<!-- headroom-update:${JSON.stringify(c)} -->\n## Headroom update\n\n- Headroom: \`${oldPin}\` → \`${c.headroomVersion}\`\n- Extension: \`${c.extensionVersion}\`\n- Pi: \`${c.piVersion}\`; Python: \`3.11\`\n- Candidate: \`${c.headSha}\`\n- Result: **${assessment.ready ? 'passed' : 'unproven / failed'}** — ${assessment.reason}\n\n[Workflow run](${runUrl}) · [Sanitized smoke artifact](${runUrl}#artifacts)\n\nMerging this version bump authorizes automatic tagging and npm publication after merged-commit validation.\n`;
-  let pr = open[0];
-  if (pr) { await setDraft(api, pr, true); await api('PATCH', `/pulls/${pr.number}`, { title: `chore(headroom): update to ${c.headroomVersion}`, body }); }
-  else pr = await api('POST', '/pulls', { head: BRANCH, base: 'main', title: `chore(headroom): update to ${c.headroomVersion}`, body, draft: true });
-  if (assessment.ready && await fresh()) {
+  const body = `<!-- headroom-update:${JSON.stringify(c)} -->\n## Headroom update\n\n- Headroom: \`${oldPin}\` → \`${c.headroomVersion}\`\n- Extension: \`${c.extensionVersion}\`\n- Pi: \`${c.piVersion}\`; Python: \`3.11\`\n- Candidate: \`${c.headSha}\`\n- Result: **${assessment.ready ? 'passed' : 'unproven / failed'}** — ${assessment.reason}\n\n${evidenceSummary(evidence, c.headSha)}\n\n[Workflow run](${runUrl}) · [Sanitized smoke artifact](${runUrl}#artifacts)\n\nMerging this version bump authorizes automatic tagging and npm publication after merged-commit validation.\n`;
+  // Recheck immediately before each mutation, including the failure/draft path.
+  // Earlier checks can become stale while inspecting source or listing PRs.
+  const guard = async pr => {
+    if (!await fresh()) return { action: 'stale', ready: false };
+    const current = await api('GET', `/pulls/${pr.number}`);
+    if (!current || current.state !== 'open') return { action: 'closed', ready: false };
+    if (!owned(current) || current.head.sha !== c.headSha || !await fresh()) return { action: 'stale', ready: false };
+    return null;
+  };
+  let pr = open[0], blocked;
+  if (pr) {
+    if ((blocked = await guard(pr))) return blocked;
+    await setDraft(api, pr, true);
+    if ((blocked = await guard(pr))) return blocked;
+    await api('PATCH', `/pulls/${pr.number}`, { title: `chore(headroom): update to ${c.headroomVersion}`, body });
+  } else {
+    if (!await fresh()) return { action: 'stale', ready: false };
+    const current = await pullRequests(api, repository);
+    if (await isRejected(current, c.headroomVersion, deps)) return { action: 'closed', ready: false };
+    if (current.some(p => p.state === 'open') || !await fresh()) return { action: 'stale', ready: false };
+    pr = await api('POST', '/pulls', { head: BRANCH, base: 'main', title: `chore(headroom): update to ${c.headroomVersion}`, body, draft: true });
+  }
+  if (assessment.ready) {
+    if ((blocked = await guard(pr))) return blocked;
     await setDraft(api, pr, false);
     if (!await fresh()) { await setDraft(api, pr, true); return { action: 'stale', ready: false }; }
     return { action: 'ready', ready: true };

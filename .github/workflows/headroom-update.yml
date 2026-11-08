@@ -63,7 +63,7 @@ jobs:
 
   finalize:
     needs: [prepare, offline, smoke]
-    if: ${{ always() && needs.prepare.outputs.has_update == 'true' }}
+    if: ${{ always() && !cancelled() && needs.prepare.outputs.has_update == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

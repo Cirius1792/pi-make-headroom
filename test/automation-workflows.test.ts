@@ -44,7 +44,7 @@ test('nightly orchestration gates promotion on exact-candidate CI and smoke, inc
   assert.match(text, /uses: \.\/\.github\/workflows\/ci\.yml/);
   assert.match(text, /uses: \.\/\.github\/workflows\/compatibility-smoke\.yml/);
   assert.equal((text.match(/checkout_ref: \$\{\{ needs\.prepare\.outputs\.candidate_sha \}\}/g) ?? []).length, 2);
-  assert.match(text, /if: \$\{\{ always\(\) && needs\.prepare\.outputs\.has_update == 'true' \}\}/);
+  assert.match(text, /if: \$\{\{ always\(\) && !cancelled\(\) && needs\.prepare\.outputs\.has_update == 'true' \}\}/, 'a cancelled run must not promote even when both dependencies already succeeded');
   assert.match(text, /ref: \$\{\{ needs\.prepare\.outputs\.base_sha \}\}/);
   assert.match(text, /OFFLINE_RESULT: \$\{\{ needs\.offline\.result \}\}/);
   assert.match(text, /SMOKE_RESULT: \$\{\{ needs\.smoke\.result \}\}/);
