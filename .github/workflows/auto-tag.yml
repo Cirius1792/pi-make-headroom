@@ -1,0 +1,94 @@
+name: Auto tag release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Never cancel a release-intent run. Prepare one version bump at a time:
+# GitHub concurrency keeps at most one pending run, not a durable FIFO queue.
+concurrency:
+  group: auto-tag-release
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      should_release: ${{ steps.plan.outputs.should_release }}
+      release_sha: ${{ steps.plan.outputs.release_sha }}
+      release_tag: ${{ steps.plan.outputs.release_tag }}
+      headroom_version: ${{ steps.plan.outputs.headroom_version }}
+      pi_version: ${{ steps.plan.outputs.pi_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Check whether the push deliberately increased the package version
+        id: plan
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        run: node scripts/tag-release.mjs plan
+
+  offline:
+    needs: plan
+    if: needs.plan.outputs.should_release == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      checkout_ref: ${{ needs.plan.outputs.release_sha }}
+
+  smoke:
+    needs: plan
+    if: needs.plan.outputs.should_release == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/compatibility-smoke.yml
+    with:
+      checkout_ref: ${{ needs.plan.outputs.release_sha }}
+      pi_version: ${{ needs.plan.outputs.pi_version }}
+      headroom_version: ${{ needs.plan.outputs.headroom_version }}
+
+  tag:
+    needs: [plan, offline, smoke]
+    if: needs.plan.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.release_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: compatibility-smoke-result
+          path: evidence/
+      - name: Verify evidence, create or verify tag, then dispatch publishing
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.plan.outputs.release_sha }}
+          RELEASE_TAG: ${{ needs.plan.outputs.release_tag }}
+          HEADROOM_VERSION: ${{ needs.plan.outputs.headroom_version }}
+          PI_VERSION: ${{ needs.plan.outputs.pi_version }}
+          OFFLINE_RESULT: ${{ needs.offline.result }}
+          SMOKE_RESULT: ${{ needs.smoke.result }}
+          E2E_RESULT_PATH: evidence/compatibility-smoke-result.json
+        run: node scripts/tag-release.mjs publish

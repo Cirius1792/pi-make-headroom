@@ -66,6 +66,7 @@ test('GitHub HTTP adapter handles status and malformed payloads without leaking 
   assert.deepEqual(await githubRequest('/test', { token, request: async (_url: string, options: any) => { assert.equal(options.headers.Authorization, `Bearer ${token}`); return Response.json({ ok: true }); } }), { ok: true });
   assert.equal(await githubRequest('/test', { token, request: async () => new Response(null, { status: 204 }) }), null);
   assert.equal(await githubRequest('/test', { token, request: async () => new Response(null, { status: 404 }) }), null);
+  await assert.rejects(githubRequest('/dispatches', { method: 'POST', token, request: async () => new Response(null, { status: 404 }) }), /404/);
   for (const status of [401, 403, 429, 500]) {
     await assert.rejects(githubRequest('/test', { token, request: async () => new Response(token, { status }) }), error => !String(error).includes(token));
   }

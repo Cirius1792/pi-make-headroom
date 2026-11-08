@@ -3,6 +3,21 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 
 const workflow = (name: string) => readFileSync(new URL(`../.github/workflows/${name}.yml`, import.meta.url), 'utf8');
+test('main release chain revalidates the pushed SHA and dispatch preserves the trusted publisher', () => {
+  const text = workflow('auto-tag'), release = workflow('release');
+  assert.match(text, /branches: \[main\]/);
+  assert.match(text, /BEFORE_SHA: \$\{\{ github\.event\.before \}\}/);
+  assert.match(text, /AFTER_SHA: \$\{\{ github\.sha \}\}/);
+  assert.equal((text.match(/checkout_ref: \$\{\{ needs\.plan\.outputs\.release_sha \}\}/g) ?? []).length, 2);
+  assert.match(text, /needs: \[plan, offline, smoke\]/);
+  assert.match(text, /actions: write/);
+  assert.match(text, /cancel-in-progress: false/);
+  assert.doesNotMatch(text, /secrets: inherit|id-token: write|npm publish/);
+  assert.match(release, /workflow_dispatch:/);
+  assert.match(release, /RELEASE_REF_TYPE: \$\{\{ github\.ref_type \}\}/);
+  assert.match(release, /id-token: write/);
+});
+
 // Narrow configuration contracts: actionlint separately validates YAML/expression syntax.
 // These catch a dropped checkout ref, gate, or permission boundary in the actual wiring.
 test('reusable validators retain original entry points and check out caller-selected commits read-only', () => {

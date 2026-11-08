@@ -34,6 +34,13 @@ function isCodePosition(source, end) {
   return state === "code";
 }
 
+export function validateReleaseRef(refType, refName) {
+  if (refType !== 'tag' || typeof refName !== 'string' || !/^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(refName) || refName.endsWith('\n')) {
+    throw new Error('Release must run on an actual canonical stable version-tag ref');
+  }
+  return refName;
+}
+
 export function readReleaseMetadata(tag, manifest, source) {
   const match = /^v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$/.exec(tag ?? "");
   if (!match || match[0] !== tag) throw new Error("Expected a stable vX.Y.Z tag without leading zeroes");
@@ -100,6 +107,7 @@ async function main() {
   const metadata = readReleaseMetadata(process.env.RELEASE_TAG, manifest, readFileSync("src/index.ts", "utf8"));
   switch (process.argv[2]) {
     case "prepare": {
+      validateReleaseRef(process.env.RELEASE_REF_TYPE, process.env.RELEASE_TAG);
       mkdirSync("release", { recursive: true });
       const packed = JSON.parse(execFileSync("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", "release"], { encoding: "utf8" }));
       const filename = verifyPack(packed, metadata);

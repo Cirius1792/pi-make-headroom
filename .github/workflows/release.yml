@@ -3,6 +3,7 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -59,6 +60,7 @@ jobs:
 
       - name: Validate tag and default Headroom pin, then pack once
         env:
+          RELEASE_REF_TYPE: ${{ github.ref_type }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: node scripts/release.mjs prepare
 

@@ -18,7 +18,7 @@ export async function githubRequest(path, { method = 'GET', body, token, request
       ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(30_000), redirect: 'error',
     });
   } catch { throw new Error('GitHub request failed or timed out'); }
-  if (response.status === 404 || response.status === 204) return null;
+  if (response.status === 404 && method === 'GET' || response.status === 204) return null;
   if (!response.ok) throw new Error(`GitHub request failed (HTTP ${response.status})`);
   try {
     const text = await response.text();
