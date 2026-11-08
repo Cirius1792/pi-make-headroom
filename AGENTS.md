@@ -25,6 +25,7 @@
 3. Make the smallest change that solves the problem.
 4. Run the smallest relevant check; run `npm test` before claiming done.
 5. Paste command output as evidence. Never say "tested" or "all green" without it.
+6. For release requests, follow `./docs/RELEASING.md`. Substitute the requested version for the guide's examples and skip completed one-time setup. Prepare the release PR; merging it or pushing a release tag requires explicit user authorization. A tag push publishes to npm and creates a GitHub Release.
 
 ## File map
 | Path | Purpose |
