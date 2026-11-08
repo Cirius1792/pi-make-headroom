@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-08
+
 - Renamed the npm package to `@cltec/pi-make-headroom`; remove previous unscoped npm installations before switching to avoid duplicate compression.
 - Added tag-triggered npm trusted publishing and GitHub Releases showing the default Headroom version from the tagged source, plus a maintainer release guide.
 - Added a manual `Compatibility smoke` workflow and maintainer guide for checking an exact Pi / Headroom version pair with the packed checkout, real managed Headroom, and a local mock LLM; publishes a sanitized result without implying a full compatibility guarantee.
