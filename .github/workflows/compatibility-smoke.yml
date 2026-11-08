@@ -12,6 +12,21 @@ on:
         required: true
         type: string
 
+  workflow_call:
+    inputs:
+      pi_version:
+        description: Exact published Pi npm version
+        required: true
+        type: string
+      headroom_version:
+        description: Exact canonical Headroom PyPI version
+        required: true
+        type: string
+      checkout_ref:
+        description: Exact commit to validate (defaults to the caller commit)
+        required: false
+        type: string
+
 permissions:
   contents: read
 
@@ -27,6 +42,7 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
           persist-credentials: false
 
       - name: Set up Node

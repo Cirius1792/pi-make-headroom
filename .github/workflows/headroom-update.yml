@@ -1,0 +1,99 @@
+name: Headroom update
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: headroom-update
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      has_update: ${{ steps.prepare.outputs.has_update }}
+      candidate_sha: ${{ steps.prepare.outputs.candidate_sha }}
+      base_sha: ${{ steps.prepare.outputs.base_sha }}
+      headroom_version: ${{ steps.prepare.outputs.headroom_version }}
+      extension_version: ${{ steps.prepare.outputs.extension_version }}
+      pi_version: ${{ steps.prepare.outputs.pi_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Prepare or reuse managed update commit
+        id: prepare
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/headroom-update.mjs prepare
+
+  offline:
+    needs: prepare
+    if: needs.prepare.outputs.has_update == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      checkout_ref: ${{ needs.prepare.outputs.candidate_sha }}
+
+  smoke:
+    needs: prepare
+    if: needs.prepare.outputs.has_update == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/compatibility-smoke.yml
+    with:
+      checkout_ref: ${{ needs.prepare.outputs.candidate_sha }}
+      pi_version: ${{ needs.prepare.outputs.pi_version }}
+      headroom_version: ${{ needs.prepare.outputs.headroom_version }}
+
+  finalize:
+    needs: [prepare, offline, smoke]
+    if: ${{ always() && needs.prepare.outputs.has_update == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check out trusted preparation helpers, not candidate code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.base_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Download smoke evidence if produced
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: compatibility-smoke-result
+          path: evidence/
+      - name: Create or update ready/draft PR
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
+          CANDIDATE_SHA: ${{ needs.prepare.outputs.candidate_sha }}
+          HEADROOM_VERSION: ${{ needs.prepare.outputs.headroom_version }}
+          EXTENSION_VERSION: ${{ needs.prepare.outputs.extension_version }}
+          PI_VERSION: ${{ needs.prepare.outputs.pi_version }}
+          OFFLINE_RESULT: ${{ needs.offline.result }}
+          SMOKE_RESULT: ${{ needs.smoke.result }}
+          E2E_RESULT_PATH: evidence/compatibility-smoke-result.json
+        run: node scripts/headroom-update.mjs finalize

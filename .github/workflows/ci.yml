@@ -4,12 +4,18 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: Exact commit to validate (defaults to the caller commit)
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -24,6 +30,9 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+          persist-credentials: false
 
       - name: Set up Node
         uses: actions/setup-node@v4
