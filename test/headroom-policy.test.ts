@@ -7,7 +7,7 @@ const files = {
   'package.json': JSON.stringify(manifest),
   'src/index.ts': 'const DEFAULT_VERSION = "0.42.0";\n// Preserve this comment.\n',
   'README.md': 'Default `headroom-ai[proxy]==0.42.0`.\nInstalls `headroom-ai[proxy]==0.42.0`.\n| `HEADROOM_VERSION` | `0.42.0` | default |\nHistorical baseline: 0.42.0\n',
-  'docs/CONFIGURATION.md': '| `HEADROOM_VERSION` | `0.42.0` | default |\nHistorical baseline: 0.42.0\n',
+  'docs/CONFIGURATION.md': '```json\n{\n  "version": "0.42.0",\n  "extras": "proxy"\n}\n```\n| `HEADROOM_VERSION` | `0.42.0` | default |\nHistorical baseline: 0.42.0\n',
   'CHANGELOG.md': '# Changelog\n\n## [Unreleased]\n\n- Pending feature.\n\n## [0.1.1] - 2026-11-08\n\n- Previous release with 0.42.0.\n',
 };
 const distribution = { filename: 'headroom.whl', yanked: false };
@@ -55,6 +55,8 @@ test('file preparation bumps once from the base, retaining history and unrelated
   assert.equal(JSON.parse(first.files['package.json']).version, '0.2.0');
   assert.equal(first.files['src/index.ts'], 'const DEFAULT_VERSION = "0.43.1";\n// Preserve this comment.\n');
   assert.match(first.files['README.md'], /Historical baseline: 0\.42\.0/);
+  assert.match(first.files['docs/CONFIGURATION.md'], /"version": "0\.43\.1"/);
+  assert.match(first.files['docs/CONFIGURATION.md'], /Historical baseline: 0\.42\.0/);
   assert.match(first.files['README.md'], /\| `HEADROOM_VERSION` \| `0\.43\.1`/);
   assert.match(first.files['CHANGELOG.md'], /## \[0\.2\.0\] - 2026-11-09/);
   assert.equal(first.files['CHANGELOG.md'].split('- Pending feature.').length, 2);

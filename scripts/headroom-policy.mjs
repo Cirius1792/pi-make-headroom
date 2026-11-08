@@ -48,6 +48,7 @@ export function buildUpdateFiles(input, candidate, date) {
   const table = new RegExp(`(\\| \x60HEADROOM_VERSION\x60 \\| \x60)${old}(\x60 \\|)`, 'g');
   files['README.md'] = replaceExactly(files['README.md'], table, `$1${candidate}$2`, 1);
   files['docs/CONFIGURATION.md'] = replaceExactly(input['docs/CONFIGURATION.md'], table, `$1${candidate}$2`, 1);
+  files['docs/CONFIGURATION.md'] = replaceExactly(files['docs/CONFIGURATION.md'], new RegExp(`(^  "version": ")${old}(",$)`, 'gm'), `$1${candidate}$2`, 1);
   const changelog = input['CHANGELOG.md'];
   if (typeof changelog !== 'string' || [...changelog.matchAll(/^## \[Unreleased\]\s*$/gm)].length !== 1 || changelog.includes(`## [${extensionVersion}]`)) throw new Error('Missing or ambiguous Unreleased changelog');
   files['CHANGELOG.md'] = changelog.replace(/^## \[Unreleased\][^\n]*\n([\s\S]*?)(?=^## \[|(?![\s\S]))/m, (_, notes) =>
