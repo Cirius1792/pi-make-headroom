@@ -7,7 +7,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { readReleaseMetadata, checkPublication, releaseNotes, verifyPack } from "../scripts/release.mjs";
+import { readReleaseMetadata, checkPublication, releaseNotes, verifyPack, validateReleaseRef } from "../scripts/release.mjs";
+
+test('release dispatch must target an actual canonical stable tag, never a branch', () => {
+  assert.equal(validateReleaseRef('tag', 'v0.2.0'), 'v0.2.0');
+  for (const [type, name] of [['branch', 'main'], ['branch', 'v0.2.0'], ['tag', 'v0.2.0rc1'], ['tag', 'v0.2.0\n']]) {
+    assert.throws(() => validateReleaseRef(type, name));
+  }
+});
 
 const manifest = { name: "@cltec/pi-make-headroom", version: "0.1.1" };
 const source = 'const DEFAULT_VERSION = "0.42.0";\n';
@@ -138,7 +145,7 @@ test("prepare CLI packs the validated checkout and emits usable Actions metadata
       writeFileSync(join(cwd, path), "DO_NOT_PACK=fixture-only");
     }
     const output = join(cwd, "outputs");
-    const env = { ...process.env, RELEASE_TAG: "v0.1.1", GITHUB_OUTPUT: output };
+    const env = { ...process.env, RELEASE_REF_TYPE: 'tag', RELEASE_TAG: "v0.1.1", GITHUB_OUTPUT: output };
     execFileSync(process.execPath, [cli, "prepare"], { cwd, env, stdio: "pipe" });
     assert.match(readFileSync(output, "utf8"), /version=0\.1\.1\n/);
     assert.match(readFileSync(output, "utf8"), /headroom_version=0\.42\.0\n/);

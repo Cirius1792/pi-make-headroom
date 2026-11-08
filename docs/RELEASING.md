@@ -1,10 +1,11 @@
 # Publish a release to npm and GitHub
 
-Use this guide to configure trusted publishing once, then release by pushing a stable `vX.Y.Z` tag. The npm package is **`@cltec/pi-make-headroom`**, not the previous unscoped package. GitHub Releases show the default Headroom pin read from that tag's `src/index.ts`; Headroom itself is installed later into the managed Python venv, not bundled in the npm archive.
+Use this guide to configure trusted publishing once, then release by merging a deliberate stable version bump into `main`. Automation validates the merged commit, creates its `vX.Y.Z` tag, and dispatches publication. Manual stable tag pushes remain supported. The npm package is **`@cltec/pi-make-headroom`**, not the previous unscoped package. GitHub Releases show the default Headroom pin read from that tag's `src/index.ts`; Headroom itself is installed later into the managed Python venv, not bundled in the npm archive.
 
 ## Prerequisites
 
-- Maintainer access to `Cirius1792/pi-make-headroom`, with GitHub Actions enabled and permission to push release tags.
+- Maintainer access to `Cirius1792/pi-make-headroom`, with GitHub Actions enabled and permission to merge release PRs and create release tags.
+- Python **3.11** for the managed compatibility gate. Automated checks use fixed Pi **1.5.0**, configured in `scripts/headroom-automation.json`.
 - Ownership of npm user scope `@cltec`, or publishing permission in the npm organization `cltec`.
 - An npm account with verified email and two-factor authentication for the initial manual publication.
 - Node 24 and npm **11.5.1 or newer** for trusted publishing. The workflow uses GitHub-hosted runners; self-hosted runners are not supported by this setup.
@@ -55,42 +56,55 @@ The workflow must already exist at `.github/workflows/release.yml` in the reposi
 
 Configure this when ready to release: npm currently requires the first successful publication within **two days** of adding the trusted publisher. If it expires, delete and recreate the configuration before retrying. See [npm's trusted publishing documentation](https://docs.npmjs.com/trusted-publishers/) for current requirements.
 
+## Enable Headroom update automation
+
+After reviewing and merging the automation implementation without bumping `package.json` or the default pin:
+
+1. In repository **Settings → Actions → General**, allow the workflows' declared job permissions and enable **Allow GitHub Actions to create and approve pull requests**. Organization policies may need maintainer attention. Workflows create PRs, not approvals or automatic merges.
+2. Keep branch protection and tag rules in place. Permit the automation identity to create release tags if the tag rules require authorization; do not broadly bypass protection.
+3. Confirm npm's trusted publisher still names `release.yml`; OIDC publication stays there. No new personal token, npm token, or GitHub App is required.
+4. Run **Actions → Headroom update → Run workflow** to trial discovery. Nightly checks run at **03:17 UTC**, subject to GitHub scheduling delays.
+5. Inspect the candidate PR, exact-version evidence, and ready/draft state. If GitHub requires approval before running bot-created PR workflows, use **Approve workflows run**; required PR checks still apply even though automation directly calls its own CI/smoke gates.
+
+The update PR includes the next **minor** extension version and new Headroom pin. It remains draft if CI/smoke fails or evidence is missing. Read its run/artifact for installation, health, compression, and cleanup results. Manual branch edits stop regeneration; closing an unmerged PR rejects the same candidate. A later Headroom release may create a new update. See [compatibility checks](COMPATIBILITY.md).
+
 ## 3. Prepare the next version in a pull request
 
-For the first automated release, use `0.1.1` (manual bootstrap already used `0.1.0`):
+Headroom update PRs prepare the version and changelog automatically. For an ordinary extension release, deliberately choose the next version and prepare it yourself. For example, if current `main` is `0.1.1`, prepare `0.2.0`:
 
 ```bash
-git switch -c chore/release-v0.1.1
-npm version 0.1.1 --no-git-tag-version
+git switch -c chore/release-v0.2.0
+npm version 0.2.0 --no-git-tag-version
 ```
 
-Update `CHANGELOG.md` with a `0.1.1` entry, then verify and commit:
+Update `CHANGELOG.md` with a `0.2.0` entry, then verify and commit:
 
 ```bash
 npm test
 npm pack --dry-run --ignore-scripts
 git add package.json CHANGELOG.md
-git commit -m "chore(release): prepare v0.1.1"
-git push -u origin chore/release-v0.1.1
+git commit -m "chore(release): prepare v0.2.0"
+git push -u origin chore/release-v0.2.0
 ```
 
-Open, review, and merge the pull request. The workflow does not bump versions or commit changes for you.
+Open and review the pull request. **Merging a deliberate version increase authorizes automatic publication** after merged-commit validation. Ordinary commits with an unchanged package version do not create tags. If another release lands while a version-bump PR is open, regenerate/rebase its version and changelog before merging; versions must increase monotonically.
 
-## 4. Push the release tag
+## 4. Automatic tags and publication
 
-Fetch the merged changes and verify that the commit you will tag contains the intended release and `package.json` version `0.1.1`:
+Every push to `main`, including a normal PR merge, starts **Auto tag release**. It compares package versions at the full push's before/after commits. If the version increased, it runs offline CI and real compatibility smoke against the exact pushed commit using the fixed Pi/Python baseline and that source's default Headroom pin. Only after both pass does it create `v0.2.0` at that SHA and explicitly dispatch **Release** at the tag.
+
+The tag is never placed at a newer moving `main` tip, and an existing tag is never moved. Failed checks create no tag. A conflicting existing tag stops the workflow. A same-tag/same-SHA retry can dispatch again after an earlier dispatch failure.
+
+Explicit dispatch is necessary: a tag created using `GITHUB_TOKEN` does **not** trigger another push-event workflow. `release.yml` accepts both explicit dispatch and manual tag pushes, but rejects dispatches against branch refs (including `main`). Do not select `main` in **Release → Run workflow**; select the intended stable version tag. A dispatch acknowledgement means the Release run was requested, not that npm publication succeeded.
+
+For a manually authorized tag release, verify the reviewed commit/version, then use the existing alternative:
 
 ```bash
-git switch main
-git pull --ff-only origin main
-npm pkg get name version
-git log -1 --oneline
-
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.2.0 <reviewed-commit-sha>
+git push origin v0.2.0
 ```
 
-Push one release at a time and wait for completion. Releases share a concurrency group: an active publication is never cancelled by a newer tag, but GitHub retains at most one pending run in that group.
+Prepare **one release at a time** and wait for completion. Tagging and publishing have non-cancelling concurrency groups, but GitHub retains at most one pending run per group; it is not a durable FIFO queue for every intermediate version bump.
 
 The **Release** workflow:
 
@@ -106,13 +120,18 @@ No GitHub Release is created if npm publication fails. Explicit `HEADROOM_VERSIO
 
 Check all three outcomes:
 
+- For a version-bump merge, **Actions → Auto tag release** validates the correct SHA, creates/verifies the expected tag, and dispatches successfully.
 - GitHub **Actions → Release** has successful validation, packaging, publishing, and GitHub Release jobs.
-- npm lists `@cltec/pi-make-headroom@0.1.1`.
-- GitHub Releases lists `v0.1.1` with the correct default Headroom version and install command.
+- npm lists the expected version (for the example, `@cltec/pi-make-headroom@0.2.0`).
+- GitHub Releases lists the matching tag (`v0.2.0`) with the correct default Headroom version and install command.
 
 For a public repository and public package, npm trusted publishing automatically generates provenance. After the first successful trusted publication, consider npm's **Publishing access → Require two-factor authentication and disallow tokens** setting, and protect `v*` tags using repository rulesets.
 
-If publication fails:
+If tagging or publication fails:
+
+- **Discovery or candidate validation failed:** inspect **Headroom update** and the draft PR; fix through review or rerun discovery. Registry errors do not become "no update" results. Unchanged candidates reuse their commit and PR.
+- **Main validation failed:** no tag is created. Investigate the smoke artifact/offline tests before rerunning. Re-run the original failed workflow for a transient problem; a code fix needs a reviewed commit and, where appropriate, a new version bump.
+- **Tag created, dispatch failed:** re-run **Auto tag release**. It verifies the existing tag points to the exact intended SHA, then retries dispatch. Alternatively, explicitly dispatch **Release** at that tag. Never move the tag or dispatch against `main`.
 
 - **Tag mismatch / invalid pin:** fix the release preparation through a PR before issuing a new tag. Do not move an already published tag or overwrite an npm version.
 - **OIDC / authentication failure:** compare the exact owner, repository, workflow filename, environment, allowed actions, and expiry in npm settings. Verify the runner is GitHub-hosted and npm is >=11.5.1. `npm whoami` is not a test of OIDC authorization.

@@ -34,11 +34,11 @@ The extension never logs prompts, message content, API keys, or proxy tokens, so
 
 **Fix.** Read the tail of `proxy.log`, then run `/headroom reinstall`. If the log mentions a version mismatch (`Proxy on port 8788 is version X, expected Y`), an old proxy is holding the port — run `/headroom stop`, then `/headroom on`.
 
-## `Python 3.10+ was not found`
+## `Python … was not found`
 
-**Why.** No interpreter on `PATH` meets the pin's floor. Headroom 0.43+ needs Python 3.11+.
+**Why.** No interpreter on `PATH` meets the pin's floor. The exact error names the version needed by that pin; the supported baseline is Python **3.11+**.
 
-**Fix.** Install a newer Python, or point `HEADROOM_PYTHON` (or `python` in `config.json`) at an interpreter. On Debian and Ubuntu, `python3` alone is not enough — install `python3-venv` and `python3-pip` as well. The error names the newest version it did find, which is usually the one you need to upgrade.
+**Fix.** Install Python 3.11 or newer, or point `HEADROOM_PYTHON` (or `python` in `config.json`) at an interpreter. On Debian and Ubuntu, `python3` alone is not enough — install `python3-venv` and `python3-pip` as well. The error names the newest version it did find, which is usually the one you need to upgrade.
 
 ## `pip install failed`
 
