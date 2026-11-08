@@ -1,0 +1,153 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+# Publishing is irreversible: never cancel an active release for a newer tag.
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Run tests
+        run: npm test
+
+      - name: Check module imports
+        run: node --experimental-strip-types -e "await import('./src/proxy-manager.ts')"
+
+      - name: Check package contents
+        run: npm pack --dry-run --ignore-scripts
+
+  package:
+    name: Prepare checked release archive
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Validate tag and default Headroom pin, then pack once
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/release.mjs prepare
+
+      - name: Preserve the checked archive and release notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-release
+          path: release/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to npm using trusted publishing
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node and npm registry
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Verify npm supports trusted publishing
+        run: |
+          node --input-type=module <<'NODE'
+          import { execFileSync } from 'node:child_process';
+          const version = execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim();
+          const [major, minor, patch] = version.split('.').map(Number);
+          if (!(major > 11 || major === 11 && (minor > 5 || minor === 5 && patch >= 1))) {
+            throw new Error(`npm >=11.5.1 is required for trusted publishing; found ${version}`);
+          }
+          console.log(`Using npm ${version}`);
+          NODE
+
+      - name: Download the checked archive
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-release
+          path: release/
+
+      - name: Check whether this exact archive is already published
+        id: publication
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/release.mjs check-publication
+
+      - name: Publish the checked archive
+        if: steps.publication.outputs.action == 'publish'
+        run: npm publish ./release/package.tgz --access public --registry=https://registry.npmjs.org/ --ignore-scripts
+
+      - name: Report verified retry
+        if: steps.publication.outputs.action == 'skip'
+        run: echo "This exact archive is already on npm; continuing to GitHub Release creation."
+
+  github-release:
+    name: Create GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-release
+          path: release/
+
+      - name: Create release with the default Headroom version and generated change notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" --json tagName >/dev/null 2>&1; then
+            echo "GitHub Release $RELEASE_TAG already exists; leaving it unchanged."
+          else
+            gh release create "$RELEASE_TAG" \
+              --verify-tag \
+              --title "$RELEASE_TAG" \
+              --notes-file release/notes.md \
+              --generate-notes
+          fi

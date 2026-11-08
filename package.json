@@ -1,6 +1,10 @@
 {
-  "name": "pi-make-headroom",
+  "name": "@cltec/pi-make-headroom",
   "version": "0.1.0",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "description": "Make Headroom! Managed Headroom context compression for Pi: pinned Python venv, lazy setup, no npm dependencies.",
   "keywords": [
     "pi-package",
@@ -22,6 +26,8 @@
   },
   "files": [
     "src",
+    "!src/**/.env*",
+    "!src/**/*.env",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"

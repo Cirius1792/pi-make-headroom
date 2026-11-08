@@ -3,7 +3,7 @@
 **Managed [Headroom](https://pypi.org/project/headroom-ai/) context compression for [Pi](https://pi.dev) — pinned Python venv, lazy setup, no npm dependencies.**
 
 [![CI](https://github.com/Cirius1792/pi-make-headroom/actions/workflows/ci.yml/badge.svg)](https://github.com/Cirius1792/pi-make-headroom/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/pi-make-headroom)](https://www.npmjs.com/package/pi-make-headroom)
+[![npm](https://img.shields.io/npm/v/%40cltec%2Fpi-make-headroom)](https://www.npmjs.com/package/@cltec/pi-make-headroom)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 Headroom is a compression proxy: it shrinks a conversation before the model reads it. This extension wires it into Pi. It provisions a private Python venv under `~/.pi/agent/make-headroom`, installs an exact `headroom-ai[proxy]` version, runs the proxy on loopback, and compresses each model request through Pi's `context` hook.
@@ -22,7 +22,7 @@ There is no service to install, no port to remember, and nothing left behind to 
 ## Quick start
 
 ```bash
-pi install npm:pi-make-headroom
+pi install npm:@cltec/pi-make-headroom
 ```
 
 Start Pi. The footer shows `⏳ Headroom starting` while the venv is built, then `✓ Headroom up · ready`, then savings as requests go through.
@@ -46,7 +46,7 @@ On Debian or Ubuntu, install `python3-venv` alongside Python. A `python3` withou
 ### From npm
 
 ```bash
-pi install npm:pi-make-headroom
+pi install npm:@cltec/pi-make-headroom
 ```
 
 ### From Git
@@ -68,7 +68,7 @@ pi install /path/to/pi-make-headroom
 ### For one run, without changing settings
 
 ```bash
-pi -e npm:pi-make-headroom
+pi -e npm:@cltec/pi-make-headroom
 pi -e git:github.com/Cirius1792/pi-make-headroom
 pi -e /path/to/pi-make-headroom
 ```
@@ -76,7 +76,7 @@ pi -e /path/to/pi-make-headroom
 ### Update
 
 ```bash
-pi update npm:pi-make-headroom
+pi update npm:@cltec/pi-make-headroom
 pi update git:github.com/Cirius1792/pi-make-headroom
 ```
 
@@ -86,13 +86,15 @@ Updating the extension does not change the Headroom pin. Versions are chosen by 
 
 ```bash
 /headroom stop                      # in Pi, so no proxy is left holding the port
-pi remove npm:pi-make-headroom      # or the git: or local path you installed from
+pi remove npm:@cltec/pi-make-headroom # or the git: or local path you installed from
 rm -rf ~/.pi/agent/make-headroom    # venv, config, logs
 ```
 
-If the original `pi-headroom` package is still installed, remove it first. Both extensions hook the same event and would compress the same transcript twice:
+Before switching to the scoped package, remove any previous `pi-make-headroom` or original `pi-headroom` npm installation. Do not install them alongside `@cltec/pi-make-headroom`: they hook the same event and would compress the same transcript twice.
 
 ```bash
+# Run only for packages you previously installed:
+pi remove npm:pi-make-headroom
 pi remove npm:pi-headroom
 ```
 
@@ -193,6 +195,7 @@ For savings that stay at zero, lock timeouts, leftover proxies, a full reset, an
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Symptom-by-symptom fixes, logs, reset, uninstall. |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System context, lifecycle, modules, failure modes. |
 | [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | Run the manual Pi / Headroom version-pair smoke check. |
+| [docs/RELEASING.md](docs/RELEASING.md) | Configure npm trusted publishing and release a tagged version. |
 | [docs/adr/](docs/adr/) | Architecture decision records. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, tests, PR workflow, coding standards. |
 | [AGENTS.md](AGENTS.md) | Agent instructions: verified commands, invariants, boundaries. |
