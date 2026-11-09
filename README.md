@@ -195,6 +195,7 @@ For savings that stay at zero, lock timeouts, leftover proxies, a full reset, an
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Symptom-by-symptom fixes, logs, reset, uninstall. |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System context, lifecycle, modules, failure modes. |
 | [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | Manual smoke checks and nightly tested Headroom update PRs. |
+| [docs/AUTOMATIC-UPDATES.md](docs/AUTOMATIC-UPDATES.md) | How discovery, candidate validation, maintainer approval, and automatic releases fit together. |
 | [docs/RELEASING.md](docs/RELEASING.md) | Configure trusted publishing and automatic releases after version-bump merges. |
 | [docs/adr/](docs/adr/) | Architecture decision records. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, tests, PR workflow, coding standards. |
