@@ -11,7 +11,7 @@ The extension writes `~/.pi/agent/make-headroom/config.json` on the first sessio
 ```json
 {
   "_comment": "pi-make-headroom configuration. Environment variables override these values.",
-  "version": "0.43.1",
+  "version": "0.44.0",
   "extras": "proxy",
   "port": 8788,
   "host": "127.0.0.1"
@@ -42,7 +42,7 @@ Two values are sanitized for safety rather than rejected: `HEADROOM_HOME` pointi
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `HEADROOM_VERSION` | `0.43.1` | Exact `headroom-ai` version to install. Changing it triggers a reinstall on the next setup. |
+| `HEADROOM_VERSION` | `0.44.0` | Exact `headroom-ai` version to install. Changing it triggers a reinstall on the next setup. |
 | `HEADROOM_EXTRAS` | `proxy` | pip extras. Keep `proxy`: it provides the proxy server the extension talks to. |
 | `HEADROOM_PORT` | `8788` | First port to try. The extension scans the next 49 ports if it is busy. |
 | `HEADROOM_HOST` | `127.0.0.1` | Bind address for the managed proxy. |

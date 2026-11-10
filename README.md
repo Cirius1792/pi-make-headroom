@@ -13,7 +13,7 @@ There is no service to install, no port to remember, and nothing left behind to 
 ## What it handles for you
 
 - **No npm dependencies.** Pi's host packages are peer dependencies; the extension uses Node built-ins and `fetch`.
-- **A pinned version.** Installs exactly `headroom-ai[proxy]==0.43.1` by default, inside its own venv, never into the system Python.
+- **A pinned version.** Installs exactly `headroom-ai[proxy]==0.44.0` by default, inside its own venv, never into the system Python.
 - **Lazy setup.** Sessions start immediately. Install and startup happen in the background, and compression switches on when they finish.
 - **A managed lifecycle.** Start, health-check, adopt, restart, and stop the proxy automatically.
 - **Honest numbers.** The footer shows exact tokens saved and their share of baseline context.
@@ -101,7 +101,7 @@ pi remove npm:pi-headroom
 ## First run
 
 1. Creates `~/.pi/agent/make-headroom/venv` with `python -m venv`.
-2. Installs the pinned version, by default `headroom-ai[proxy]==0.43.1`.
+2. Installs the pinned version, by default `headroom-ai[proxy]==0.44.0`.
 3. Starts `headroom proxy` on `127.0.0.1:8788`, or the next free port within 50.
 4. Waits for `GET /health`, plus a brief wait for the optional Kompress model to warm up.
 
@@ -160,7 +160,7 @@ Precedence: environment variables, then `~/.pi/agent/make-headroom/config.json`,
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `HEADROOM_VERSION` | `0.43.1` | Exact `headroom-ai` version to install. |
+| `HEADROOM_VERSION` | `0.44.0` | Exact `headroom-ai` version to install. |
 | `HEADROOM_PORT` | `8788` | First port to try; the next 49 are scanned if it is busy. |
 | `HEADROOM_HOME` | `~/.pi/agent/make-headroom` | Venv, config, runtime state, and logs. |
 | `HEADROOM_PYTHON` | auto | Interpreter used to create the venv. |
