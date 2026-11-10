@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-10
+
+- Updated the default Headroom pin from `0.43.1` to `0.44.0`.
+
 ## [0.2.0] - 2026-11-08
 
 - Added nightly PyPI discovery and tested Headroom update PRs: fixed Pi 1.5.0/Python 3.11 compatibility smoke, minor extension-version bumps, and draft PRs when validation fails.
